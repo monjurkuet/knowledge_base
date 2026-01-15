@@ -1,0 +1,66 @@
+[project]
+name = "knowledge-base"
+version = "0.1.0"
+description = "High-Fidelity GraphRAG Knowledge Base System with entity resolution, hierarchical community detection, and recursive summarization"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+    "openai>=1.0.0",
+    "instructor>=1.0.0",
+    "psycopg[pool]>=3.1.0",
+    "networkx>=3.0.0",
+    "graspologic>=3.0.0",
+    "google-genai>=1.58.0",
+    "websockets>=12.0.0",
+    "httpx>=0.25.0",
+    "python-multipart>=0.0.6",
+    "python-dotenv>=1.0.0",
+    "rich",
+]
+
+[project.optional-dependencies]
+streamlit = [
+    "streamlit>=1.28.0",
+    "requests>=2.31.0",
+    "plotly>=5.17.0",
+]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.scripts]
+kb-pipeline = "knowledge_base.pipeline:main"
+kb-server = "knowledge_base.main_api:main"
+kb-test = "tests.test_agent:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501", "SIM117", "B904", "B008"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+allow_redefinition = false
+disallow_any_generics = true
+disallow_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true

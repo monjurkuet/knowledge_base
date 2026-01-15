@@ -1,0 +1,121 @@
+# Major Technology Companies and Their History
+
+## Apple Inc.
+
+Apple Computer Company was founded on April 1, 1976, by Steve Jobs, Steve Wozniak, and Ronald Wayne in Jobs' parents' garage in Los Altos, California. The company introduced the Apple I personal computer in 1976 and the Apple II in 1977, which became highly successful.
+
+In 1984, Apple released the Macintosh, introducing the graphical user interface to mass market. However, the 1980s brought increasing competition from IBM PC compatibles, leading toJobs' ouster in 1985.
+
+After being ousted from Apple, Steve Jobs founded NeXT Computer and acquired Pixar. Meanwhile, Apple struggled throughout the late 1980s and 1990s, nearly going bankrupt.
+
+In 1997, Apple acquired NeXT, bringing Jobs back as CEO. Jobs immediately restructured the company, forging a partnership with Microsoft and introducing the iMac in 1998.
+
+The 2000s marked Apple's renaissance:
+- 2001: Launch of iPod, revolutionizing portable music
+- 2001: Opening of first Apple Store
+- 2003: Launch of iTunes Store, transforming music distribution
+- 2007: Introduction of iPhone, creating the smartphone market
+- 2010: Release of iPad, defining the tablet market
+- 2011: Steve Jobs resigns as CEO, Tim Cook takes over
+- 2011: Death of Steve Jobs on October 5
+
+Under Tim Cook's leadership:
+- 2014: Apple Watch launched
+- 2015: Apple Music service introduced
+- 2018: Apple becomes first $1 trillion company
+- 2020: Apple switches to Apple Silicon for Macs
+- 2022: Apple becomes first $3 trillion company
+
+## Microsoft Corporation
+
+Microsoft was founded on April 4, 1975, by Bill Gates and Paul Allen in Albuquerque, New Mexico. The name "Microsoft" was coined in 1975, combining "microcomputer" and "software."
+
+Key milestones:
+- 1975: First product (Altair BASIC) developed
+- 1985: Windows 1.0 released
+- 1986: Microsoft goes public
+- 1995: Windows 95 launched with massive marketing campaign
+- 1998: U.S. v. Microsoft antitrust case begins
+- 2000: Steve Ballmer succeeds Gates as CEO
+- 2001: Xbox launched, entering gaming market
+- 2008: Gates retires from full-time role
+- 2014: Satya Nadella becomes CEO
+- 2015: Windows 10 released as free upgrade
+- 2016: LinkedIn acquired for $26.2 billion
+- 2023: Activision Blizzard acquired for $69 billion
+
+Under Satya Nadella, Microsoft has embraced cloud computing with Azure, becoming the world's second-largest cloud provider.
+
+## Google (Alphabet Inc.)
+
+Google was founded by Larry Page and Sergey Brin while they were PhD students at Stanford University in 1996. The company was incorporated in 1998.
+
+Google's evolution:
+- 1998: Google.com domain registered
+- 2000: Google AdWords launched
+- 2001: Eric Schmidt becomes CEO
+- 2004: Google goes public (IPO)
+- 2006: YouTube acquired for $1.65 billion
+- 2008: Chrome browser and Android OS launched
+- 2011: Google+ social network launched
+- 2015: Alphabet Inc. created as parent company
+- 2019: Pichai becomes CEO of Google
+- 2023: Google celebrates 25th anniversary
+
+Key products: Search, Maps, Gmail, Google Drive, Google Photos, Google Translate, Android, Chrome, YouTube, Pixel phones
+
+## Amazon
+
+Amazon was founded by Jeff Bezos on July 5, 1994, in Bezos' garage in Bellevue, Washington. Originally an online bookstore called "Cadabra," Bezos renamed it Amazon after the world's largest river.
+
+Amazon's expansion:
+- 1995: Amazon.com launches as online bookstore
+- 1997: Initial public offering (IPO)
+- 2002: Amazon Web Services (AWS) launched
+- 2005: Amazon Prime introduced
+- 2006: S3 and EC2 launch, establishing cloud dominance
+- 2007: Kindle e-reader released
+- 2013: Amazon Fresh grocery service launches
+- 2017: Whole Foods acquired for $13.7 billion
+- 2018: Amazon becomes second U.S. company to reach $1 trillion market cap
+- 2021: Jeff Bezos steps down as CEO, Andy Jassy takes over
+- 2022: AWS revenue exceeds $80 billion
+
+AWS dominates cloud computing with 32% market share.
+
+## Meta Platforms (Facebook)
+
+Facebook was founded by Mark Zuckerberg in February 2004 while he was a student at Harvard University.
+
+Timeline:
+- 2004: Facebook launched from Harvard dorm room
+- 2004: Expanded to other universities
+- 2006: Opened to anyone over 13
+- 2009: Became profitable
+- 2012: Facebook goes public (largest tech IPO at the time)
+- 2012: Instagram acquired for $1 billion
+- 2014: WhatsApp acquired for $19 billion
+- 2016: Oculus acquired for $2 billion
+- 2018: Cambridge Analytica scandal
+- 2019: Facebook announces Libra cryptocurrency
+- 2021: Company renames to Meta Platforms
+- 2022: Meta invests heavily in metaverse
+- 2023: Threads launched as Twitter competitor
+
+## Tesla Inc.
+
+Tesla was incorporated in 2003 by Martin Eberhard and Marc Tarpenning, with Elon Musk investing heavily and taking leadership roles.
+
+Key achievements:
+- 2008: Tesla Roadster delivered (first highway-legal electric car)
+- 2010: Tesla goes public (IPO)
+- 2012: Model S launched, winning Car of the Year
+- 2015: Model X launched
+- 2017: Model 3 production begins
+- 2019: Gigafactory Shanghai opens
+- 2020: Tesla joins S&P 500
+- 2021: Model Y becomes best-selling electric vehicle globally
+- 2022: Tesla reaches $1 trillion market cap
+- 2023: Cybertruck announced
+
+Under Elon Musk's leadership, Tesla has driven the global transition to sustainable energy.

@@ -1,0 +1,30 @@
+# Comprehensive Technology Knowledge Base
+
+## Artificial Intelligence
+
+Artificial Intelligence (AI) is a branch of computer science that creates machines capable of mimicking human intelligence. Machine Learning (ML) is a subset of AI that enables systems to learn from data without explicit programming. Deep Learning uses neural networks with multiple layers to process complex patterns.
+
+**Key AI Applications:**
+- Natural Language Processing (NLP) powers ChatGPT and BERT
+- Computer Vision enables autonomous vehicles and facial recognition
+- Reinforcement Learning打败了围棋世界冠军李世石 in 2016
+
+## Major Tech Companies
+
+Apple revolutionized personal computing with the Macintosh in 1984, then transformed mobile phones with the iPhone in 2007. Steve Jobs co-founded Apple in 1976 and returned as CEO in 1997 after being ousted in 1985.
+
+Microsoft, founded by Bill Gates and Paul Allen in 1975, dominates enterprise software with Windows and Office. Under Satya Nadella (CEO since 2014), Microsoft shifted to cloud computing with Azure.
+
+Google, founded by Larry Page and Sergey Brin at Stanford in 1998, controls 90% of global search engine market. The company went public in 2004 and acquired YouTube in 2006.
+
+## Space Exploration Milestones
+
+Sputnik 1 launched on October 4, 1957, marking the start of the Space Age. Yuri Gagarin became the first human in space on April 12, 1961, aboard Vostok 1. Apollo 11 landed on the Moon on July 20, 1969, with Neil Armstrong taking the first steps.
+
+The International Space Station (ISS) has been continuously occupied since November 2000. NASA's Artemis program aims to return humans to the Moon by 2026.
+
+## Quantum Computing
+
+Quantum computers use qubits that can exist in superposition states. Shor's Algorithm (1994) can factor large numbers exponentially faster than classical computers, threatening current encryption. Grover's Algorithm (1996) provides quadratic speedup for search problems.
+
+Google claimed quantum supremacy in 2019 with their Sycamore processor solving a problem in 200 seconds that would take supercomputers 10,000 years.

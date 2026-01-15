@@ -1,0 +1,6 @@
+# DOCUMENT 1: THE ORIGINS OF NEURAL-LINK (2020-2023)
+
+In early 2020, the foundation for modern brain-computer interfaces was laid by **Dr. Samuel 'Sam' Oakley** at the **Zurich Neuro Lab (ZNL)**. 
+His primary project, dubbed **'Project Synapse'**, was funded by a $12 million grant from **The Gaea Trust** in June 2021.
+
+By late 2022, Oakley was joined by a brilliant protégé, **Elara Thorne**, who previously worked at **DeepMind**. Together, they developed the **'Synaptic Bridge'** protocol. However, in January 2023, ZNL was acquired by **Aether Corp**, a move that sparked controversy. Director **S. Oakley** (Sam) initially resisted but eventually signed the merger in March 2023.

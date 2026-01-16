@@ -36,12 +36,13 @@ knowledge_base/
 │   ├── api.py               # FastAPI REST endpoints
 │   ├── websocket.py         # Real-time communication system
 │   └── main_api.py          # API server entry point
-│
-├── 🔧 Configuration Files:
-│   ├── requirements.txt     # Python dependencies
-│   ├── .env                 # Environment variables (local)
-│   ├── .env.template        # Environment configuration template
-│   └── schema.sql           # PostgreSQL database schema
+ │
+ ├── 🔧 Configuration Files:
+ │   ├── pyproject.toml         # Python project configuration and dependencies
+ │   ├── uv.lock               # Dependency lock file for reproducible builds
+ │   ├── .env                 # Environment variables (local)
+ │   ├── .env.template        # Environment configuration template
+ │   └── schema.sql           # PostgreSQL database schema
 │
 └── 📚 Documentation:
     ├── README.md            # Project overview and quick start
@@ -276,14 +277,28 @@ def main():
 
 ### **5. Testing & Data Layer**
 
-#### **`tests/master_test.py`** - Integration Testing
+#### **Test Suite** (`tests/`)
 ```python
 # Comprehensive test suite covering:
 # - Document ingestion pipeline
-# - Entity extraction accuracy
+# - Entity extraction accuracy  
 # - Community detection quality
 # - Search functionality
 # - API endpoint validation
+# - WebSocket real-time updates
+```
+
+#### **Test Files**
+```
+test_agent.py        # Agentic test manager with intelligent orchestration
+test_api.py          # API endpoint validation
+test_community.py    # Community detection and hierarchy tests
+test_domain.py       # Domain management and template tests
+test_ingestor.py     # Entity and relationship extraction tests
+test_pipeline.py     # Full pipeline integration tests
+test_resolver.py     # Entity resolution and deduplication tests
+test_summarizer.py   # Recursive summarization tests
+test_websocket.py    # Real-time communication tests
 ```
 
 #### **`tests/data/`** - Test Datasets
@@ -568,7 +583,7 @@ Docker Compose
 ### **Local Development**
 ```bash
 # Setup
-pip install -r requirements.txt
+uv sync --dev
 cp .env.template .env
 # Configure .env
 
@@ -577,8 +592,8 @@ createdb knowledge_base
 psql -d knowledge_base -f schema.sql
 
 # Development servers
-python main_api.py              # Terminal 1
-cd streamlit-ui && streamlit run app.py  # Terminal 2
+uv run kb-server                   # Terminal 1
+cd streamlit-ui && uv run streamlit run app.py  # Terminal 2
 ```
 
 ### **Code Organization Principles**

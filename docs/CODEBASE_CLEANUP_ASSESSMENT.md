@@ -15,8 +15,8 @@ Core System Files (12 files) - ALL ESSENTIAL
 - ✅ schema.sql - PostgreSQL database schema
 - ✅ visualize.py - CLI visualization tool
 Configuration Files (4 files) - ALL ESSENTIAL
-- ✅ requirements.txt - Python dependencies for main system
-- ✅ streamlit-ui/requirements.txt - UI-specific dependencies  
+- ✅ pyproject.toml - Python project configuration and dependencies
+- ✅ uv.lock - Dependency lock file for reproducible builds
 - ✅ .env.template - Environment configuration template
 - ✅ .env - Local environment variables (user-specific)
 Documentation Files (6 files) - ALL ESSENTIAL

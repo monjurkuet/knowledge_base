@@ -158,9 +158,6 @@ async def websocket_endpoint(websocket: WebSocket, channel: str = "general"):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket, channel)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        manager.disconnect(websocket, channel)
 
 
 class ProgressTracker:

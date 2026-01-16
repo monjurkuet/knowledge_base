@@ -28,7 +28,14 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ### 3. Install Dependencies
 ```bash
-pip install -r requirements.txt
+# Install all dependencies
+uv sync
+
+# Install with development dependencies
+uv sync --dev
+
+# Install with Streamlit UI dependencies
+uv sync --all-extras
 ```
 
 ### 4. Database Setup
@@ -109,13 +116,17 @@ LOG_LEVEL=INFO
 
 #### Start API Server
 ```bash
-python main_api.py
+uv run kb-server
+# or
+uv run python -m knowledge_base.main_api
 ```
 
 #### Start Web Interface
 ```bash
 cd streamlit-ui
-streamlit run app.py
+uv run streamlit run app.py
+# Or if Streamlit is installed via extras:
+uv run --with streamlit streamlit run streamlit-ui/app.py
 ```
 
 ### Production Deployment
@@ -135,7 +146,7 @@ Type=simple
 User=kb-user
 WorkingDirectory=/path/to/knowledge_base
 Environment=PATH=/path/to/venv/bin
-ExecStart=/path/to/venv/bin/python main_api.py
+ExecStart=/path/to/venv/bin/uv run kb-server
 Restart=always
 RestartSec=5
 
@@ -154,7 +165,7 @@ Type=simple
 User=kb-user
 WorkingDirectory=/path/to/knowledge_base/streamlit-ui
 Environment=PATH=/path/to/venv/bin
-ExecStart=/path/to/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+ExecStart=/path/to/venv/bin/uv run --with streamlit streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 Restart=always
 RestartSec=5
 
@@ -175,7 +186,7 @@ sudo systemctl start knowledge-base-ui
 
 **Dockerfile**:
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -184,15 +195,19 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN uv sync --no-dev
 
 # Copy application
 COPY . .
 
 EXPOSE 8000
-CMD ["python", "main_api.py"]
+CMD ["uv", "run", "kb-server"]
 ```
 
 **docker-compose.yml**:
@@ -241,17 +256,23 @@ volumes:
 
 **Dockerfile.ui**:
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app/streamlit-ui
 
-COPY streamlit-ui/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
+# Install Streamlit dependencies
+COPY pyproject.toml uv.lock ./
+RUN uv sync --extra streamlit
+
+# Copy application
 COPY streamlit-ui/ .
 
 EXPOSE 8501
-CMD ["streamlit", "run", "app.py", "--server.address", "0.0.0.0"]
+CMD ["uv", "run", "--with", "streamlit", "streamlit", "run", "app.py", "--server.address", "0.0.0.0"]
 ```
 
 ### Cloud Deployment

@@ -10,6 +10,7 @@ from knowledge_base.community import CommunityDetector
 from knowledge_base.config import get_config
 from knowledge_base.ingestor import GraphIngestor, KnowledgeGraph
 from knowledge_base.resolver import EntityResolver
+from knowledge_base.log_emitter import emit_log
 
 load_dotenv()
 
@@ -34,69 +35,117 @@ class KnowledgePipeline:
             db_conn_str=self.config.database.connection_string
         )
 
-    async def run(self, file_path: str, domain_id: str | None = None):
+    async def run(
+        self,
+        file_path: str,
+        domain_id: str | None = None,
+        channel_id: str | None = None,
+    ):
         """
         Run the full High-Fidelity Pipeline on a single file.
         """
-        logger.info(f"=== Starting Pipeline for {file_path} ===")
+        if channel_id:
+            await emit_log(channel_id, f"=== Starting Pipeline for {file_path} ===")
 
-        # 1. Read File
         try:
-            with open(file_path, encoding="utf-8") as f:
-                text = f.read()
+            # 1. Read File
+            if channel_id:
+                await emit_log(channel_id, "--- Stage 1: Reading file ---")
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    text = f.read()
+            except Exception as e:
+                if channel_id:
+                    await emit_log(channel_id, f"Failed to read file: {e}", "error")
+                return
+
+            # 2. Ingestion (Extraction)
+            if channel_id:
+                await emit_log(
+                    channel_id, "--- Stage 2: High-Resolution Extraction ---"
+                )
+            graph: KnowledgeGraph = await self.ingestor.extract(text)
+            if channel_id:
+                await emit_log(
+                    channel_id,
+                    f"Extracted {len(graph.entities)} entities and {len(graph.relationships)} relationships.",
+                )
+
+            # 3. Resolution & Storage
+            if channel_id:
+                await emit_log(
+                    channel_id, "--- Stage 3: Hybrid Entity Resolution & Storage ---"
+                )
+            await self._store_graph(graph, domain_id, channel_id)
+
+            # 4. Community Detection
+            if channel_id:
+                await emit_log(channel_id, "--- Stage 4: Community Detection ---")
+            G = await self.community_detector.load_graph()
+            if G.number_of_nodes() > 0:
+                memberships = self.community_detector.detect_communities(G)
+                await self.community_detector.save_communities(memberships)
+                if channel_id:
+                    # Extract unique cluster IDs from the list of membership records
+                    cluster_ids = {record["cluster_id"] for record in memberships}
+                    await emit_log(
+                        channel_id,
+                        f"Detected {len(cluster_ids)} communities.",
+                    )
+
+            # 5. Recursive Summarization
+            if channel_id:
+                await emit_log(channel_id, "--- Stage 5: Recursive Summarization ---")
+            from knowledge_base.summarizer import CommunitySummarizer
+
+            summarizer = CommunitySummarizer(self.db_conn_str)
+            await summarizer.summarize_all()
+            if channel_id:
+                await emit_log(channel_id, "Community summarization complete.")
+
+            if channel_id:
+                await emit_log(channel_id, "=== Pipeline Complete ===", "success")
+
         except Exception as e:
-            logger.error(f"Failed to read file: {e}")
-            return
+            if channel_id:
+                await emit_log(channel_id, f"Pipeline failed: {str(e)}", "error")
+            logger.error(f"Pipeline failed for {file_path}: {e}", exc_info=True)
 
-        # 2. Ingestion (Extraction)
-        logger.info("--- Stage 1: High-Resolution Extraction ---")
-        graph: KnowledgeGraph = await self.ingestor.extract(text)
-
-        # 3. Resolution & Storage
-        logger.info("--- Stage 2: Hybrid Entity Resolution & Storage ---")
-        await self._store_graph(graph, domain_id)
-
-        # 4. Community Detection (Optional: Usually run in batch, not per file)
-        # We'll run it here for the demo/prototype feel
-        logger.info("--- Stage 3: Community Detection ---")
-        G = await self.community_detector.load_graph()
-        if G.number_of_nodes() > 0:
-            memberships = self.community_detector.detect_communities(G)
-            await self.community_detector.save_communities(memberships)
-
-        # 5. Recursive Summarization
-        logger.info("--- Stage 4: Recursive Summarization ---")
-        from knowledge_base.summarizer import CommunitySummarizer
-
-        summarizer = CommunitySummarizer(self.db_conn_str)
-        await summarizer.summarize_all()
-
-        logger.info("=== Pipeline Complete ===")
-
-    async def _store_graph(self, graph: KnowledgeGraph, domain_id: str | None = None):
+    async def _store_graph(
+        self,
+        graph: KnowledgeGraph,
+        domain_id: str | None = None,
+        channel_id: str | None = None,
+    ):
         """
         Resolves entities and inserts edges.
         """
-        # Map localized entity names to resolved DB UUIDs
-        # name_to_id = {"Project Alpha": "uuid-123", ...}
         name_to_id = {}
 
         # 1. Resolve Entities
-        for entity in graph.entities:
-            # TODO: Generate embedding for entity (using a simplified method or call an embedding service)
-            # For this prototype, we'll use a placeholder or call Google Embeddings if available
+        if channel_id:
+            await emit_log(channel_id, f"Resolving {len(graph.entities)} entities...")
+        for i, entity in enumerate(graph.entities):
             embedding = await self._get_embedding(f"{entity.name} {entity.description}")
 
-            # Resolve and Insert
-            # Convert Pydantic model to dict for resolver
             entity_dict = entity.model_dump()
             resolved_id = await self.resolver.resolve_and_insert(
                 entity_dict, embedding, domain_id
             )
             name_to_id[entity.name] = resolved_id
+            if channel_id and (i + 1) % 10 == 0:
+                await emit_log(
+                    channel_id, f"Resolved {i + 1}/{len(graph.entities)} entities..."
+                )
+
+        if channel_id:
+            await emit_log(channel_id, "Entity resolution complete.")
 
         # 2. Insert Edges
-        # We need a direct DB connection here or move this to Resolver
+        if channel_id:
+            await emit_log(
+                channel_id, f"Inserting {len(graph.relationships)} relationships..."
+            )
         from psycopg import AsyncConnection
 
         async with await AsyncConnection.connect(self.db_conn_str) as conn:
@@ -122,26 +171,32 @@ class KnowledgePipeline:
                             ),
                         )
 
+                if channel_id:
+                    await emit_log(channel_id, "Relationship insertion complete.")
+
                 # 3. Insert Events
+                if channel_id:
+                    await emit_log(
+                        channel_id, f"Inserting {len(graph.events)} events..."
+                    )
                 for event in graph.events:
                     node_id = name_to_id.get(event.primary_entity)
                     if node_id:
-                        # Normalize date
                         clean_date = event.normalized_date
                         if clean_date and len(clean_date) == 4 and clean_date.isdigit():
                             clean_date = f"{clean_date}-01-01"
                         elif (
                             clean_date and len(clean_date) == 7 and clean_date[4] == "-"
                         ):
-                            clean_date = f"{clean_date}-01"  # Handle YYYY-MM
+                            clean_date = f"{clean_date}-01"
 
-                        # Use a sub-transaction (SAVEPOINT) to protect the main transaction
                         try:
                             async with conn.transaction():
                                 await cur.execute(
                                     """
                                     INSERT INTO events (node_id, description, timestamp, raw_time_desc)
                                     VALUES (%s, %s, %s, %s)
+                                    ON CONFLICT (node_id, description, raw_time_desc) DO NOTHING
                                     """,
                                     (
                                         node_id,
@@ -154,19 +209,9 @@ class KnowledgePipeline:
                             logger.warning(
                                 f"Skipping invalid date '{clean_date}' for event: {event.description}. Error: {e}"
                             )
-                            # Try one more time without the date
-                            try:
-                                async with conn.transaction():
-                                    await cur.execute(
-                                        """
-                                        INSERT INTO events (node_id, description, raw_time_desc)
-                                        VALUES (%s, %s, %s)
-                                        """,
-                                        (node_id, event.description, event.raw_time),
-                                    )
-                            except Exception:
-                                pass  # Give up on this specific event
 
+                if channel_id:
+                    await emit_log(channel_id, "Event insertion complete.")
                 await conn.commit()
 
     async def _get_embedding(self, text: str) -> list[float]:
@@ -207,6 +252,7 @@ def main():
     args = parser.parse_args()
 
     pipeline = KnowledgePipeline()
+    # For CLI, we don't have a channel_id, so logging will be local
     asyncio.run(pipeline.run(args.file))
 
 

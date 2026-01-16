@@ -113,15 +113,50 @@ async def websocket_endpoint(websocket: WebSocket, channel: str = "general"):
     await manager.connect(websocket, channel)
 
     try:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "connection",
+                    "status": "connected",
+                    "channel": channel,
+                    "timestamp": asyncio.get_event_loop().time(),
+                }
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send connection acknowledgment: {e}")
+
+    try:
         while True:
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
                 logger.debug(f"Received message from client: {message}")
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "echo",
+                            "data": message,
+                            "timestamp": asyncio.get_event_loop().time(),
+                        }
+                    )
+                )
             except json.JSONDecodeError:
                 logger.warning(f"Invalid JSON received: {data}")
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "echo",
+                            "data": data,
+                            "timestamp": asyncio.get_event_loop().time(),
+                        }
+                    )
+                )
 
     except WebSocketDisconnect:
+        manager.disconnect(websocket, channel)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket, channel)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")

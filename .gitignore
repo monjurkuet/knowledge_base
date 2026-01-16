@@ -16,3 +16,27 @@ test_report.md
 # Local secrets
 tests/.env
 .env
+
+# Log files
+*.log
+api.log
+streamlit.log
+
+# Development and test artifacts
+test_*.py
+*_test.py
+*_tests.py
+
+# Development/debug files
+*step*.py
+*minimal*.py
+*lazy*.py
+*simple*.py
+*websocket*.py
+*debug*.py
+*working*.py
+*clean*.py
+*run_*.py
+
+# Streamlit cache
+.streamlit/

@@ -7,7 +7,7 @@ import os
 from typing import Any
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -16,6 +16,7 @@ from knowledge_base.config import get_config
 from knowledge_base.pipeline import KnowledgePipeline
 from knowledge_base.resolver import EntityResolver
 from knowledge_base.summarizer import CommunitySummarizer
+from knowledge_base.websocket import websocket_endpoint
 
 load_dotenv()
 
@@ -89,6 +90,7 @@ def get_summarizer():
 class IngestTextRequest(BaseModel):
     text: str
     filename: str | None = "uploaded_text.txt"
+    channel_id: str | None = None
 
 
 class SearchRequest(BaseModel):
@@ -144,7 +146,7 @@ async def ingest_text(request: IngestTextRequest):
             f.write(request.text)
 
         # Run the pipeline
-        await get_pipeline().run(temp_file)
+        await get_pipeline().run(temp_file, channel_id=request.channel_id)
 
         # Clean up
         os.remove(temp_file)
@@ -160,7 +162,7 @@ async def ingest_text(request: IngestTextRequest):
 
 
 @app.post("/api/ingest/file")
-async def ingest_file(file: UploadFile = File(...)):
+async def ingest_file(file: UploadFile = File(...), channel_id: str | None = None):
     """Upload and ingest a text file"""
     try:
         # Read file content
@@ -173,7 +175,7 @@ async def ingest_file(file: UploadFile = File(...)):
             f.write(text)
 
         # Run the pipeline
-        await get_pipeline().run(temp_file)
+        await get_pipeline().run(temp_file, channel_id=channel_id)
 
         # Clean up
         os.remove(temp_file)
@@ -449,7 +451,7 @@ async def get_graph_data(
 
 
 @app.post("/api/community/detect")
-async def detect_communities():
+async def detect_communities(channel_id: str | None = None):
     """Run community detection on the current graph"""
     try:
         G = await get_community_detector().load_graph()
@@ -471,7 +473,7 @@ async def detect_communities():
 
 
 @app.post("/api/summarize")
-async def run_summarization():
+async def run_summarization(channel_id: str | None = None):
     """Run recursive summarization on communities"""
     try:
         await get_summarizer().summarize_all()
@@ -480,3 +482,21 @@ async def run_summarization():
     except Exception as e:
         logger.error(f"Summarization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
+
+
+logger.info("About to define WebSocket routes")
+
+
+@app.websocket("/ws")
+async def websocket_route(websocket: WebSocket, channel: str = "general"):
+    logger.info(f"WebSocket route called with channel: {channel}")
+    await websocket_endpoint(websocket, channel)
+
+
+@app.websocket("/ws/{channel}")
+async def websocket_channel_route(websocket: WebSocket, channel: str):
+    logger.info(f"WebSocket channel route called with channel: {channel}")
+    await websocket_endpoint(websocket, channel)
+
+
+logger.info("WebSocket routes defined")

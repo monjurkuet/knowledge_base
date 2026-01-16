@@ -45,9 +45,7 @@ class APIConfig(BaseModel):
 
     host: str = Field(default_factory=lambda: os.getenv("API_HOST", "0.0.0.0"))
     port: int = Field(default_factory=lambda: int(os.getenv("API_PORT", "8000")))
-    cors_origins: list = Field(
-        default_factory=lambda: os.getenv("CORS_ORIGINS", "*").split(",")
-    )
+    cors_origins: list = Field(default_factory=lambda: ["*"])
     reload: bool = Field(
         default_factory=lambda: os.getenv("API_RELOAD", "false").lower() == "true"
     )

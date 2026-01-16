@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from knowledge_base.community import CommunityDetector
 from knowledge_base.config import get_config
+from knowledge_base.domain_detector import get_domain_detector
 from knowledge_base.ingestor import GraphIngestor, KnowledgeGraph
 from knowledge_base.resolver import EntityResolver
 from knowledge_base.log_emitter import emit_log
@@ -27,6 +28,7 @@ class KnowledgePipeline:
     def __init__(self):
         self.config = get_config()
         self.db_conn_str = self.config.database.connection_string
+        self.domain_detector = get_domain_detector()
 
         # Initialize Components
         self.ingestor = GraphIngestor()
@@ -59,26 +61,79 @@ class KnowledgePipeline:
                     await emit_log(channel_id, f"Failed to read file: {e}", "error")
                 return
 
-            # 2. Ingestion (Extraction)
+            # 2. Domain Detection (AI-managed)
+            final_domain_id = domain_id
+            detected_domain_uuid = None
+            if not domain_id:
+                if channel_id:
+                    await emit_log(channel_id, "--- Stage 1.5: AI Domain Detection ---")
+                detected_domain_uuid = (
+                    await self.domain_detector.get_or_create_domain_for_text(text)
+                )
+                if channel_id:
+                    if detected_domain_uuid:
+                        await emit_log(channel_id, f"Domain assigned successfully.")
+                    else:
+                        await emit_log(
+                            channel_id,
+                            f"Using default domain (domain detection failed).",
+                        )
+
+                # Convert UUID to string for database operations
+                final_domain_id = (
+                    str(detected_domain_uuid) if detected_domain_uuid else None
+                )
+
+            # 3. Ingestion (Extraction)
             if channel_id:
                 await emit_log(
                     channel_id, "--- Stage 2: High-Resolution Extraction ---"
                 )
-            graph: KnowledgeGraph = await self.ingestor.extract(text)
+
+            entity_types_list = None
+            rel_types_list = None
+
+            if detected_domain_uuid:
+                try:
+                    entity_types = (
+                        await self.domain_detector.domain_manager.get_entity_types(
+                            detected_domain_uuid
+                        )
+                    )
+                    # Pass the full dicts (rich schema) to ingestor
+                    entity_types_list = entity_types
+
+                    rel_types = await self.domain_detector.domain_manager.get_relationship_types(
+                        detected_domain_uuid
+                    )
+                    # Pass the full dicts (rich schema) to ingestor
+                    rel_types_list = rel_types
+
+                    if channel_id:
+                        await emit_log(
+                            channel_id,
+                            f"Injecting schema: {len(entity_types_list)} entities, {len(rel_types_list)} relationships.",
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to fetch domain schema: {e}")
+
+            graph: KnowledgeGraph = await self.ingestor.extract(
+                text, entity_types=entity_types_list, relationship_types=rel_types_list
+            )
             if channel_id:
                 await emit_log(
                     channel_id,
                     f"Extracted {len(graph.entities)} entities and {len(graph.relationships)} relationships.",
                 )
 
-            # 3. Resolution & Storage
+            # 4. Resolution & Storage
             if channel_id:
                 await emit_log(
                     channel_id, "--- Stage 3: Hybrid Entity Resolution & Storage ---"
                 )
-            await self._store_graph(graph, domain_id, channel_id)
+            await self._store_graph(graph, final_domain_id, channel_id)
 
-            # 4. Community Detection
+            # 5. Community Detection
             if channel_id:
                 await emit_log(channel_id, "--- Stage 4: Community Detection ---")
             G = await self.community_detector.load_graph()
@@ -93,7 +148,7 @@ class KnowledgePipeline:
                         f"Detected {len(cluster_ids)} communities.",
                     )
 
-            # 5. Recursive Summarization
+            # 6. Recursive Summarization
             if channel_id:
                 await emit_log(channel_id, "--- Stage 5: Recursive Summarization ---")
             from knowledge_base.summarizer import CommunitySummarizer
@@ -225,6 +280,7 @@ class KnowledgePipeline:
         client = genai.Client(api_key=api_key)
 
         try:
+            client = genai.Client(api_key=api_key)
             result = client.models.embed_content(
                 model="text-embedding-004",
                 contents=text,

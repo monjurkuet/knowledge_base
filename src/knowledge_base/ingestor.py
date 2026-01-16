@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from typing import Sequence, Union, Any
 
 from pydantic import BaseModel, Field
 
@@ -105,7 +106,12 @@ class GraphIngestor:
             logger.error(f"Failed to list models: {e}")
             return []
 
-    async def extract(self, text: str) -> KnowledgeGraph:
+    async def extract(
+        self,
+        text: str,
+        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        relationship_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+    ) -> KnowledgeGraph:
         """
         High-Fidelity Extraction Pipeline (2-Pass Gleaning).
         Uses hierarchical prompting to ensure zero compromise on quality.
@@ -113,11 +119,12 @@ class GraphIngestor:
         logger.info(f"Starting extraction using model: {self.model_name}...")
 
         # Pass 1: Core Extraction
-        core_graph = await self._pass_1_core(text)
+        core_graph = await self._pass_1_core(text, entity_types, relationship_types)
         logger.info(f"Pass 1 complete. Found {len(core_graph.entities)} entities.")
 
         # Pass 2: Gleaning (Finding missed details)
-        gleaned_graph = await self._pass_2_gleaning(text, core_graph)
+        # For gleaning, we might want to pass the types again, but for now let's keep it simple
+        gleaned_graph = await self._pass_2_gleaning(text, core_graph, entity_types)
         logger.info(
             f"Pass 2 complete. Found {len(gleaned_graph.entities)} additional entities."
         )
@@ -130,27 +137,85 @@ class GraphIngestor:
 
         return final_graph
 
-    async def _pass_1_core(self, text: str) -> KnowledgeGraph:
+    async def _pass_1_core(
+        self,
+        text: str,
+        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        relationship_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+    ) -> KnowledgeGraph:
+        # Construct dynamic guidelines
+        entity_guideline = "1. ENTITIES: Identify People, Organizations, Projects, Concepts, and Locations."
+        if entity_types:
+            # Handle both strings and dicts
+            formatted_types = []
+            for et in entity_types:
+                if isinstance(et, str):
+                    formatted_types.append(et)
+                elif isinstance(et, dict):
+                    # Rich definition
+                    desc = f"{et.get('name')} ({et.get('description', '')})"
+                    if et.get("synonyms"):
+                        desc += f" [Synonyms: {', '.join(et['synonyms'])}]"
+                    formatted_types.append(desc)
+
+            comma_joined_types = "; ".join(formatted_types)
+            entity_guideline = f"1. ENTITIES: Identify the following specific types: {comma_joined_types}. Pay special attention to these categories."
+
+        relationship_guideline = (
+            "2. RELATIONSHIPS: Define explicit, typed relationships in UPPERCASE."
+        )
+        if relationship_types:
+            formatted_rels = []
+            for rt in relationship_types:
+                if isinstance(rt, str):
+                    formatted_rels.append(rt)
+                elif isinstance(rt, dict):
+                    desc = f"{rt.get('name')} ({rt.get('description', '')})"
+                    if rt.get("synonyms"):
+                        desc += f" [Synonyms: {', '.join(rt['synonyms'])}]"
+                    formatted_rels.append(desc)
+
+            comma_joined_types = "; ".join(formatted_rels)
+            relationship_guideline = f"2. RELATIONSHIPS: Identify the following specific relationship types: {comma_joined_types}. Use UPPERCASE."
+
         messages = [
             ChatMessage(
                 role="system",
-                content="You are a Senior Knowledge Graph Architect and Historian. Your task is to extract a comprehensive, high-fidelity graph and TIMELINE from unstructured text.",
+                content="You are a JSON-only extraction engine. You do not speak. You do not offer help. You only output valid JSON matching the requested schema.",
             ),
             ChatMessage(
                 role="user",
                 content=f"""
-                EXTRACT all significant entities, relationships, and CHRONOLOGICAL EVENTS.
+                Analyze the text below and extract the knowledge graph.
                 
-                **Guidelines:**
-                1. ENTITIES: Identify People, Organizations, Projects, Concepts, and Locations.
-                2. RELATIONSHIPS: Define explicit, typed relationships in UPPERCASE.
+                **CRITICAL INSTRUCTION:** 
+                Output ONLY a valid JSON object. 
+                Do NOT include markdown formatting (like ```json). 
+                Do NOT include any introductory text.
+                
+                **Text to Analyze:**
+                {text}
+
+                **Schema Guidelines:**
+                {entity_guideline}
+                {relationship_guideline}
                 3. EVENTS: Extract specific occurrences with their original time descriptions. 
                    - Link event to its primary entity.
                    - Try to normalize date to ISO 8601 (YYYY-MM-DD) if possible.
                 4. DESCRIPTIONS: Provide rich, factual descriptions for every node, edge, and event.
-                
-                **Text to Analyze:**
-                {text}
+
+                **Required JSON Structure:**
+                {{
+                    "entities": [
+                        {{"name": "EntityName", "type": "EntityType", "description": "Description..."}}
+                    ],
+                    "relationships": [
+                        {{"source": "EntityName", "target": "OtherEntity", "type": "RELATIONSHIP_TYPE", "description": "Context...", "weight": 1.0}}
+                    ],
+                    "events": [
+                        {{"primary_entity": "EntityName", "description": "Event description", "raw_time": "2024", "normalized_date": "2024-01-01"}}
+                    ]
+                }}
                 """,
             ),
         ]
@@ -223,9 +288,10 @@ class GraphIngestor:
         request = ChatCompletionRequest(
             model=self.model_name,
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
+            # tools=tools,
+            # tool_choice="auto",
             max_tokens=3000,
+            temperature=0.1,
         )
 
         response = await self.client.chat_completion(request)
@@ -235,10 +301,52 @@ class GraphIngestor:
 
         message = response["choices"][0]["message"]
         tool_calls = message.get("tool_calls", [])
+        content = message.get("content")
 
-        if not tool_calls:
-            logger.error("No tool calls in response")
-            return KnowledgeGraph()
+        # Strategy 1: Try to use Tool Calls
+        if tool_calls:
+            tool_call = tool_calls[0]
+            try:
+                import json
+
+                arguments = json.loads(tool_call["function"]["arguments"])
+                # If arguments are not empty, use them
+                if arguments and (
+                    arguments.get("entities")
+                    or arguments.get("relationships")
+                    or arguments.get("events")
+                ):
+                    logger.info(f"Successfully extracted via Tool Call.")
+                    return KnowledgeGraph(**arguments)
+                else:
+                    logger.warning(
+                        "Tool call received but arguments were empty. Attempting fallback to content parsing."
+                    )
+            except Exception as e:
+                logger.error(f"Failed to parse tool response: {e}")
+
+        # Strategy 2: Fallback to Content Parsing (JSON in text)
+        if content:
+            try:
+                import json
+                import re
+
+                # Find JSON block
+                json_match = re.search(r"\{.*\}", content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    data = json.loads(json_str)
+                    logger.info(
+                        "Successfully extracted via Content Parsing (Fallback)."
+                    )
+                    return KnowledgeGraph(**data)
+            except Exception as e:
+                logger.error(f"Failed to parse content JSON: {e}")
+
+        logger.error(
+            f"Extraction failed. No valid JSON found in tool calls or content. Raw content: {content}"
+        )
+        return KnowledgeGraph()
 
         tool_call = tool_calls[0]
         if tool_call["function"]["name"] != "extract_knowledge_graph":
@@ -249,13 +357,19 @@ class GraphIngestor:
             import json
 
             arguments = json.loads(tool_call["function"]["arguments"])
+            logger.info(
+                f"DEBUG: Tool arguments received: {json.dumps(arguments, indent=2)}"
+            )
             return KnowledgeGraph(**arguments)
         except Exception as e:
             logger.error(f"Failed to parse tool response: {e}")
             return KnowledgeGraph()
 
     async def _pass_2_gleaning(
-        self, text: str, existing_graph: KnowledgeGraph
+        self,
+        text: str,
+        existing_graph: KnowledgeGraph,
+        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
     ) -> KnowledgeGraph:
         """
         The 'Zero Compromise' quality pass. Finds details missed in first pass.

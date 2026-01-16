@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from knowledge_base.community import CommunityDetector
 from knowledge_base.config import get_config
+from knowledge_base.domain import DomainManager, DomainResponse
 from knowledge_base.pipeline import KnowledgePipeline
 from knowledge_base.resolver import EntityResolver
 from knowledge_base.summarizer import CommunitySummarizer
@@ -49,6 +50,7 @@ _pipeline = None
 _resolver = None
 _community_detector = None
 _summarizer = None
+_domain_manager = None
 
 
 def get_pipeline():
@@ -56,6 +58,13 @@ def get_pipeline():
     if _pipeline is None:
         _pipeline = KnowledgePipeline()
     return _pipeline
+
+
+def get_domain_manager():
+    global _domain_manager
+    if _domain_manager is None:
+        _domain_manager = DomainManager(config.database.connection_string)
+    return _domain_manager
 
 
 def get_resolver():
@@ -91,6 +100,7 @@ class IngestTextRequest(BaseModel):
     text: str
     filename: str | None = "uploaded_text.txt"
     channel_id: str | None = None
+    domain_id: str | None = None
 
 
 class SearchRequest(BaseModel):
@@ -136,6 +146,52 @@ async def root():
     return {"message": "Knowledge Base API", "version": "1.0.0"}
 
 
+@app.get("/api/domains", response_model=list[DomainResponse])
+async def list_domains():
+    """List all active domains"""
+    try:
+        return await get_domain_manager().list_domains()
+    except Exception as e:
+        logger.error(f"Failed to list domains: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list domains: {str(e)}")
+
+
+@app.get("/api/domains/{domain_id}", response_model=DomainResponse)
+async def get_domain(domain_id: str):
+    """Get domain details"""
+    try:
+        from uuid import UUID
+
+        domain = await get_domain_manager().get_domain(UUID(domain_id))
+        if not domain:
+            raise HTTPException(status_code=404, detail="Domain not found")
+        return domain
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid domain ID format")
+    except Exception as e:
+        logger.error(f"Failed to get domain: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get domain: {str(e)}")
+
+
+@app.get("/api/domains/{domain_id}/schema")
+async def get_domain_schema(domain_id: str):
+    """Get domain schema (entities and relationships)"""
+    try:
+        from uuid import UUID
+
+        uuid_obj = UUID(domain_id)
+        entities = await get_domain_manager().get_entity_types(uuid_obj)
+        relationships = await get_domain_manager().get_relationship_types(uuid_obj)
+        return {"entities": entities, "relationships": relationships}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid domain ID format")
+    except Exception as e:
+        logger.error(f"Failed to get domain schema: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get domain schema: {str(e)}"
+        )
+
+
 @app.post("/api/ingest/text")
 async def ingest_text(request: IngestTextRequest):
     """Ingest text content directly"""
@@ -146,7 +202,9 @@ async def ingest_text(request: IngestTextRequest):
             f.write(request.text)
 
         # Run the pipeline
-        await get_pipeline().run(temp_file, channel_id=request.channel_id)
+        await get_pipeline().run(
+            temp_file, channel_id=request.channel_id, domain_id=request.domain_id
+        )
 
         # Clean up
         os.remove(temp_file)
@@ -162,7 +220,11 @@ async def ingest_text(request: IngestTextRequest):
 
 
 @app.post("/api/ingest/file")
-async def ingest_file(file: UploadFile = File(...), channel_id: str | None = None):
+async def ingest_file(
+    file: UploadFile = File(...),
+    channel_id: str | None = None,
+    domain_id: str | None = None,
+):
     """Upload and ingest a text file"""
     try:
         # Read file content
@@ -175,7 +237,7 @@ async def ingest_file(file: UploadFile = File(...), channel_id: str | None = Non
             f.write(text)
 
         # Run the pipeline
-        await get_pipeline().run(temp_file, channel_id=channel_id)
+        await get_pipeline().run(temp_file, channel_id=channel_id, domain_id=domain_id)
 
         # Clean up
         os.remove(temp_file)

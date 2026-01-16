@@ -67,11 +67,17 @@ class APIClient:
             st.error(f"Failed to get stats: {e}")
             return {}
 
-    def ingest_text(self, text: str, filename: str, channel_id: str) -> dict[str, Any]:
+    def ingest_text(
+        self, text: str, filename: str, channel_id: str, domain_id: str | None = None
+    ) -> dict[str, Any]:
         try:
+            payload = {"text": text, "filename": filename, "channel_id": channel_id}
+            if domain_id:
+                payload["domain_id"] = domain_id
+
             response = requests.post(
                 f"{self.base_url}/api/ingest/text",
-                json={"text": text, "filename": filename, "channel_id": channel_id},
+                json=payload,
             )
             response.raise_for_status()
             return cast(dict[str, Any], response.json())
@@ -111,8 +117,26 @@ class APIClient:
             st.error(f"Failed to get communities: {e}")
             return []
 
+    def get_domains(self) -> list[dict[str, Any]]:
+        try:
+            response = requests.get(f"{self.base_url}/api/domains")
+            response.raise_for_status()
+            return cast(list[dict[str, Any]], response.json())
+        except Exception as e:
+            st.error(f"Failed to get domains: {e}")
+            return []
 
-async def websocket_client(channel_id: str, log_container: st.container):
+    def get_domain_schema(self, domain_id: str) -> dict[str, Any]:
+        try:
+            response = requests.get(f"{self.base_url}/api/domains/{domain_id}/schema")
+            response.raise_for_status()
+            return cast(dict[str, Any], response.json())
+        except Exception as e:
+            st.error(f"Failed to get domain schema: {e}")
+            return {"entities": [], "relationships": []}
+
+
+async def websocket_client(channel_id: str, log_container: Any):
     uri = f"{WS_URL}/{channel_id}"
     try:
         async with websockets.connect(uri) as websocket:
@@ -167,7 +191,9 @@ def main():
         node_type_filter = st.text_input("Filter by Node Type", "")
         show_labels = st.checkbox("Show Node Labels", True)
 
-    tab1, tab2, tab3 = st.tabs(["🕸️ Knowledge Graph", "🔍 Search", "📄 Ingest"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["🕸️ Knowledge Graph", "🔍 Search", "📚 Domains", "📄 Ingest"]
+    )
 
     with tab1:
         st.header("🕸️ Knowledge Graph Visualization")
@@ -328,8 +354,76 @@ def main():
             st.info("Enter a search query to find entities in your knowledge base.")
 
     with tab3:
+        st.header("📚 Domain Management")
+
+        domains = api_client.get_domains()
+
+        if domains:
+            # Create a selection box for domains
+            domain_names = {d["display_name"]: d["id"] for d in domains}
+            selected_domain_name = st.selectbox(
+                "Select Domain to View Schema", list(domain_names.keys())
+            )
+
+            if selected_domain_name:
+                selected_domain_id = domain_names[selected_domain_name]
+                selected_domain = next(
+                    d for d in domains if d["id"] == selected_domain_id
+                )
+
+                st.subheader(f"{selected_domain['display_name']}")
+                st.write(selected_domain.get("description", ""))
+
+                # Fetch and display schema
+                with st.spinner("Loading schema..."):
+                    schema = api_client.get_domain_schema(selected_domain_id)
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("### Entity Types")
+                    for et in schema.get("entities", []):
+                        with st.expander(f"🔹 {et['display_name']}"):
+                            st.write(f"**Description:** {et.get('description', '')}")
+                            if et.get("synonyms"):
+                                st.write(f"**Synonyms:** {', '.join(et['synonyms'])}")
+                            if et.get("validation_rules", {}).get("attributes"):
+                                st.write(
+                                    f"**Attributes:** {', '.join(et['validation_rules']['attributes'])}"
+                                )
+
+                with col2:
+                    st.markdown("### Relationship Types")
+                    for rt in schema.get("relationships", []):
+                        with st.expander(f"🔗 {rt['display_name']}"):
+                            st.write(f"**Description:** {rt.get('description', '')}")
+                            if rt.get("synonyms"):
+                                st.write(f"**Synonyms:** {', '.join(rt['synonyms'])}")
+                            st.caption(
+                                f"{rt.get('source_entity_type')} ➡️ {rt.get('target_entity_type')}"
+                            )
+
+        else:
+            st.info("No domains found. Ingest content to automatically detect domains.")
+
+    with tab4:
         st.header("Ingest New Content")
 
+        # Domain Selection for Ingestion
+        st.subheader("Domain Settings")
+        domains = api_client.get_domains()
+        domain_options = {"Auto-Detect": None}
+        for d in domains:
+            domain_options[d["display_name"]] = d["id"]
+
+        selected_ingest_domain = st.selectbox(
+            "Target Domain",
+            list(domain_options.keys()),
+            help="Select a specific domain or let AI auto-detect it based on content.",
+        )
+        target_domain_id = domain_options[selected_ingest_domain]
+
+        st.subheader("Content")
         text_input = st.text_area(
             "Enter text to ingest", height=200, key="ingest_text_area"
         )
@@ -351,7 +445,9 @@ def main():
                 filename = uploaded_file.name
 
             if content:
-                log_container.info("Starting ingestion process...")
+                log_container.info(
+                    f"Starting ingestion process (Domain: {selected_ingest_domain})..."
+                )
 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -366,12 +462,13 @@ def main():
                     content,
                     filename,
                     st.session_state.channel_id,
+                    target_domain_id,
                 )
 
                 loop.run_until_complete(asyncio.gather(ws_task, api_task))
 
                 st.success("Ingestion process finished. Refreshing data...")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.warning("Please provide text or upload a file.")
 

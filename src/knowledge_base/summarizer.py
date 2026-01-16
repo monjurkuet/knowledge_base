@@ -111,7 +111,7 @@ class CommunitySummarizer:
             messages = [
                 ChatMessage(
                     role="system",
-                    content="You are an expert Intelligence Analyst. Your goal is to synthesize structured data into a comprehensive report.",
+                    content="You are an expert Intelligence Analyst. Your goal is to synthesize structured data into a comprehensive report. You do not speak. You only output valid JSON.",
                 ),
                 ChatMessage(
                     role="user",
@@ -119,64 +119,32 @@ class CommunitySummarizer:
                     **Task:** Analyze provided entities and relationships to generate a Community Report.
                     
                     **Context (Entities & Relations):**
-                    {context_text[:50000]}  # Truncate to avoid context overflow if huge
+                    {context_text[:50000]}
                     
-                    **Requirements:**
-                    1. Title: Create a specific, descriptive title.
-                    2. Summary: Write a high-level overview.
-                    3. Findings: List key insights, contradictions, or patterns.
-                    4. Rating: Assess importance (0-10).
+                    **CRITICAL INSTRUCTION:** 
+                    Output ONLY a valid JSON object matching the structure below.
+                    Do NOT include markdown formatting.
+                    
+                    **Required JSON Structure:**
+                    {{
+                        "title": "Descriptive Title",
+                        "summary": "High-level executive summary...",
+                        "rating": 8.5,
+                        "findings": [
+                            {{"summary": "Key insight 1", "explanation": "Detailed explanation..."}},
+                            {{"summary": "Key insight 2", "explanation": "Detailed explanation..."}}
+                        ]
+                    }}
                     """,
                 ),
             ]
 
-            # Define tool for structured output
-            tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "generate_community_report",
-                        "description": "Generate a community analysis report",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "title": {
-                                    "type": "string",
-                                    "description": "A descriptive title for this community of entities.",
-                                },
-                                "summary": {
-                                    "type": "string",
-                                    "description": "High-level executive summary of community's themes.",
-                                },
-                                "rating": {
-                                    "type": "number",
-                                    "description": "Importance rating (0-10) of this community to overall domain.",
-                                },
-                                "findings": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "summary": {"type": "string"},
-                                            "explanation": {"type": "string"},
-                                        },
-                                        "required": ["summary", "explanation"],
-                                    },
-                                    "description": "List of specific insights or claims found in this community.",
-                                },
-                            },
-                            "required": ["title", "summary", "rating", "findings"],
-                        },
-                    },
-                }
-            ]
-
+            # NOTE: Removed tool definitions to force raw JSON output (more reliable)
             request = ChatCompletionRequest(
                 model=self.model_name,
                 messages=messages,
-                tools=tools,
-                tool_choice="auto",
                 max_tokens=3000,
+                temperature=0.1,
             )
 
             response = await self.client.chat_completion(request)
@@ -185,28 +153,30 @@ class CommunitySummarizer:
                 return None
 
             message = response["choices"][0]["message"]
-            tool_calls = message.get("tool_calls", [])
-
-            if not tool_calls:
-                logger.error("No tool calls in response")
-                return None
-
-            tool_call = tool_calls[0]
-            if tool_call["function"]["name"] != "generate_community_report":
-                logger.error(f"Unexpected tool call: {tool_call['function']['name']}")
-                return None
+            content = message.get("content", "")
 
             try:
                 import json
+                import re
 
-                arguments = json.loads(tool_call["function"]["arguments"])
-                report = CommunityReport(**arguments)
+                # Robust JSON extraction
+                json_match = re.search(r"\{.*\}", content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    data = json.loads(json_str)
+                    report = CommunityReport(**data)
+
+                    # Save to DB
+                    await self._save_report(community_id, report)
+                    logger.info(f"Successfully generated report for {community_id}")
+                else:
+                    logger.error(
+                        f"No JSON found in response for {community_id}. Content: {content[:100]}..."
+                    )
+
             except Exception as e:
-                logger.error(f"Failed to parse tool response: {e}")
+                logger.error(f"Failed to parse summary response: {e}")
                 return None
-
-            # Save to DB
-            await self._save_report(community_id, report)
 
         except Exception as e:
             logger.error(f"Failed to summarize community {community_id}: {e}")

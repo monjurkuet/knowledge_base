@@ -32,6 +32,9 @@ class EntityTypeTemplate(BaseModel):
     example_patterns: list[str] = Field(
         default_factory=list, description="Example patterns"
     )
+    synonyms: list[str] = Field(
+        default_factory=list, description="Synonyms for this entity type"
+    )
 
 
 class RelationshipTypeTemplate(BaseModel):
@@ -55,6 +58,9 @@ class RelationshipTypeTemplate(BaseModel):
     extraction_prompt: str = Field(..., description="LLM prompt for extraction")
     example_patterns: list[str] = Field(
         default_factory=list, description="Example patterns"
+    )
+    synonyms: list[str] = Field(
+        default_factory=list, description="Synonyms for this relationship type"
     )
 
 
@@ -421,8 +427,8 @@ class DomainManager:
                 await cur.execute(
                     """
                     INSERT INTO domain_entity_types
-                    (domain_id, name, display_name, description, icon, color, validation_rules, extraction_prompt)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    (domain_id, name, display_name, description, icon, color, validation_rules, extraction_prompt, synonyms)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -434,6 +440,7 @@ class DomainManager:
                         entity_type.color,
                         json.dumps(entity_type.validation_rules),
                         entity_type.extraction_prompt,
+                        json.dumps(entity_type.synonyms),
                     ),
                 )
                 row = await cur.fetchone()
@@ -465,8 +472,8 @@ class DomainManager:
                     """
                     INSERT INTO domain_relationship_types
                     (domain_id, name, display_name, description, source_entity_type, target_entity_type,
-                     is_directional, validation_rules, extraction_prompt)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     is_directional, validation_rules, extraction_prompt, synonyms)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -479,6 +486,7 @@ class DomainManager:
                         relationship_type.is_directional,
                         json.dumps(relationship_type.validation_rules),
                         relationship_type.extraction_prompt,
+                        json.dumps(relationship_type.synonyms),
                     ),
                 )
                 row = await cur.fetchone()
@@ -505,7 +513,7 @@ class DomainManager:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
-                    SELECT id, name, display_name, description, icon, color, validation_rules, extraction_prompt
+                    SELECT id, name, display_name, description, icon, color, validation_rules, extraction_prompt, synonyms
                     FROM domain_entity_types WHERE domain_id = %s ORDER BY name
                     """,
                     (domain_id,),
@@ -522,6 +530,7 @@ class DomainManager:
                 "color": row[5],
                 "validation_rules": row[6],
                 "extraction_prompt": row[7],
+                "synonyms": row[8],
             }
             for row in rows
         ]
@@ -541,7 +550,7 @@ class DomainManager:
                 await cur.execute(
                     """
                     SELECT id, name, display_name, description, source_entity_type, target_entity_type,
-                           is_directional, validation_rules, extraction_prompt
+                           is_directional, validation_rules, extraction_prompt, synonyms
                     FROM domain_relationship_types WHERE domain_id = %s ORDER BY name
                     """,
                     (domain_id,),
@@ -559,6 +568,7 @@ class DomainManager:
                 "is_directional": row[6],
                 "validation_rules": row[7],
                 "extraction_prompt": row[8],
+                "synonyms": row[9],
             }
             for row in rows
         ]
@@ -587,6 +597,75 @@ class DomainManager:
                 logger.warning(
                     f"Failed to add relationship type {relationship_type.name}: {e}"
                 )
+
+    async def sync_domain_schema(
+        self, domain_id: UUID, template: DomainTemplate
+    ) -> None:
+        """
+        Synchronize a domain's schema with a proposed template.
+        Merges new types and updates existing ones.
+
+        Args:
+            domain_id: Domain UUID
+            template: Proposed domain template
+        """
+        existing_entities = await self.get_entity_types(domain_id)
+        existing_relationships = await self.get_relationship_types(domain_id)
+
+        # Helper to find match
+        def find_entity_match(name: str, synonyms: list[str]) -> dict[str, Any] | None:
+            name_lower = name.lower()
+            syn_lower = {s.lower() for s in synonyms}
+
+            for existing in existing_entities:
+                if existing["name"].lower() == name_lower:
+                    return existing
+                # Check synonyms
+                existing_syns = {s.lower() for s in existing.get("synonyms", [])}
+                if name_lower in existing_syns:
+                    return existing
+                if existing["name"].lower() in syn_lower:
+                    return existing
+                # Intersection of synonyms
+                if not syn_lower.isdisjoint(existing_syns):
+                    return existing
+            return None
+
+        # Sync Entities
+        for et in template.entity_types:
+            match = find_entity_match(et.name, et.synonyms)
+            if match:
+                logger.info(
+                    f"Entity type '{et.name}' matches existing '{match['name']}'. Merging..."
+                )
+                # Merge logic: Add new synonyms
+                existing_syns = set(match.get("synonyms", []))
+                new_syns = set(et.synonyms)
+                # Also add the proposed name if it was a synonym match
+                if et.name != match["name"]:
+                    new_syns.add(et.name)
+
+                merged_syns = list(existing_syns.union(new_syns))
+
+                if len(merged_syns) > len(existing_syns):
+                    # Update DB
+                    async with await self.get_connection() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE domain_entity_types SET synonyms = %s WHERE id = %s",
+                                (json.dumps(merged_syns), match["id"]),
+                            )
+                            await conn.commit()
+            else:
+                logger.info(f"Adding new entity type: {et.name}")
+                await self.add_entity_type(domain_id, et)
+
+        # Sync Relationships (Simplified: just check name for now)
+        existing_rel_names = {r["name"] for r in existing_relationships}
+        for rt in template.relationship_types:
+            if rt.name not in existing_rel_names:
+                logger.info(f"Adding new relationship type: {rt.name}")
+                await self.add_relationship_type(domain_id, rt)
 
     @staticmethod
     def load_template_from_file(file_path: str) -> DomainTemplate:

@@ -5,7 +5,7 @@
 -- 1. Hybrid Search (Vector + Graph)
 -- 2. Hierarchical Community Detection (Leiden)
 -- 3. Recursive Summarization
--- 4. Multi-Domain Support
+-- 4. AI-Managed Multi-Domain Support
 -- ================================================================
 
 -- Extensions
@@ -14,7 +14,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ================================================================
--- 0. DOMAINS (Multi-Domain Support)
+-- 0. DOMAINS (AI-Managed Multi-Domain Support)
 -- ================================================================
 
 CREATE TABLE domains (
@@ -31,7 +31,7 @@ CREATE TABLE domains (
 CREATE INDEX idx_domains_active ON domains(is_active) WHERE is_active = TRUE;
 CREATE INDEX idx_domains_name ON domains(name);
 
-COMMENT ON TABLE domains IS 'Stores domain configurations for multi-domain knowledge base support';
+COMMENT ON TABLE domains IS 'Stores domain configurations for AI-managed multi-domain knowledge base support';
 COMMENT ON COLUMN domains.name IS 'Unique internal name (snake_case)';
 COMMENT ON COLUMN domains.display_name IS 'Human-readable name';
 COMMENT ON COLUMN domains.template_config IS 'JSON configuration for domain-specific settings';
@@ -50,6 +50,7 @@ CREATE TABLE domain_entity_types (
     color VARCHAR(20),
     validation_rules JSONB DEFAULT '{}',
     extraction_prompt TEXT,
+    synonyms JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(domain_id, name)
 );
@@ -73,6 +74,7 @@ CREATE TABLE domain_relationship_types (
     is_directional BOOLEAN DEFAULT TRUE,
     validation_rules JSONB DEFAULT '{}',
     extraction_prompt TEXT,
+    synonyms JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(domain_id, name)
 );
@@ -266,15 +268,15 @@ CREATE TRIGGER update_domains_modtime
 -- 7. DEFAULT DATA
 -- ================================================================
 
--- Insert default AI Engineering Research domain
+-- Insert default General Knowledge domain (AI-managed, not hardcoded to specific topic)
 INSERT INTO domains (name, display_name, description, template_config, is_active)
 VALUES (
-    'ai_engineering_research',
-    'AI Engineering Research',
-    'Comprehensive knowledge base for AI engineering topics including LLM optimization, context engineering, autonomous agents, and performance benchmarking.',
+    'general_knowledge',
+    'General Knowledge',
+    'Default domain for general knowledge base content. AI will automatically create specialized domains based on content analysis.',
     '{
-        "entity_types": ["research_paper", "model_architecture", "technique", "benchmark", "hyperparameter", "dataset", "experiment", "tool_framework"],
-        "relationship_types": ["cites", "proposes", "evaluates_on", "uses", "compares_with", "extends", "achieves"],
+        "entity_types": ["person", "organization", "location", "concept", "event", "publication", "project", "technology"],
+        "relationship_types": ["works_at", "located_in", "related_to", "part_of", "causes", "influences", "collaborates_with", "competes_with"],
         "extraction_config": {
             "llm_model": "gemini-2.5-flash",
             "temperature": 0.1,
@@ -284,41 +286,42 @@ VALUES (
     TRUE
 ) ON CONFLICT (name) DO NOTHING;
 
--- Insert AI Engineering entity types
+-- Insert General Knowledge entity types
 DO $$
 DECLARE
     domain_uuid UUID;
 BEGIN
-    SELECT id INTO domain_uuid FROM domains WHERE name = 'ai_engineering_research';
+    SELECT id INTO domain_uuid FROM domains WHERE name = 'general_knowledge';
     
     INSERT INTO domain_entity_types (domain_id, name, display_name, description, icon, color, extraction_prompt)
     VALUES
-        (domain_uuid, 'research_paper', 'Research Paper', 'Academic or technical research paper on AI engineering topics', 'article', '#4285F4', 'Extract research paper details including title, all authors, publication date, abstract, arXiv ID, GitHub URL, and publication venue.'),
-        (domain_uuid, 'model_architecture', 'Model Architecture', 'Neural network architecture or model design for AI systems', 'architecture', '#34A853', 'Extract AI model architecture details including name, type, parameters, layers, context length, and training data.'),
-        (domain_uuid, 'technique', 'Technique', 'Machine learning or AI engineering technique, method, or algorithm', 'psychology', '#FBBC05', 'Extract ML/AI techniques including name, category, description, advantages, and limitations.'),
-        (domain_uuid, 'benchmark', 'Benchmark', 'Evaluation benchmark, dataset, or performance metric', 'speed', '#EA4335', 'Extract benchmark details including name, metric type, task category, and evaluation methodology.'),
-        (domain_uuid, 'hyperparameter', 'Hyperparameter', 'Training or inference hyperparameter for AI models', 'tuning', '#9334E6', 'Extract hyperparameters including name, typical value, context, and impact on performance.'),
-        (domain_uuid, 'dataset', 'Dataset', 'Training, evaluation, or fine-tuning dataset', 'dataset', '#00BCD4', 'Extract dataset details including name, size, type, source, and license.'),
-        (domain_uuid, 'experiment', 'Experiment', 'Experimental setup, configuration, or result from research', 'science', '#FF6D01', 'Extract experimental details including name, objective, setup, results, and conclusions.'),
-        (domain_uuid, 'tool_framework', 'Tool or Framework', 'Software tool, library, or framework for AI development', 'code', '#7B1FA2', 'Extract tool/framework details including name, type, version, description, and use cases.')
+        (domain_uuid, 'person', 'Person', 'Individual person or character', 'person', '#4285F4', 'Extract person details including full name, role, organization, and key attributes.'),
+        (domain_uuid, 'organization', 'Organization', 'Company, institution, or group', 'business', '#34A853', 'Extract organization details including name, type, industry, and key characteristics.'),
+        (domain_uuid, 'location', 'Location', 'Geographic location, city, or place', 'location_on', '#FBBC05', 'Extract location details including name, type, country, and relevant context.'),
+        (domain_uuid, 'concept', 'Concept', 'Abstract idea, theory, or methodology', 'lightbulb', '#EA4335', 'Extract concept details including name, definition, applications, and related concepts.'),
+        (domain_uuid, 'event', 'Event', 'Occurrence, meeting, or happening', 'event', '#9334E6', 'Extract event details including name, date, participants, and significance.'),
+        (domain_uuid, 'publication', 'Publication', 'Book, paper, article, or report', 'article', '#00BCD4', 'Extract publication details including title, authors, date, and key findings.'),
+        (domain_uuid, 'project', 'Project', 'Initiative, program, or development effort', 'work', '#FF6D01', 'Extract project details including name, objectives, timeline, and outcomes.'),
+        (domain_uuid, 'technology', 'Technology', 'Tool, system, or technical innovation', 'build', '#7B1FA2', 'Extract technology details including name, purpose, features, and applications.')
     ON CONFLICT (domain_id, name) DO NOTHING;
 END $$;
 
--- Insert AI Engineering relationship types
+-- Insert General Knowledge relationship types
 DO $$
 DECLARE
     domain_uuid UUID;
 BEGIN
-    SELECT id INTO domain_uuid FROM domains WHERE name = 'ai_engineering_research';
+    SELECT id INTO domain_uuid FROM domains WHERE name = 'general_knowledge';
     
     INSERT INTO domain_relationship_types (domain_id, name, display_name, description, source_entity_type, target_entity_type, is_directional, extraction_prompt)
     VALUES
-        (domain_uuid, 'cites', 'Cites', 'Paper A cites Paper B in its references', 'research_paper', 'research_paper', TRUE, 'Identify citation relationships between research papers.'),
-        (domain_uuid, 'proposes', 'Proposes', 'Paper A proposes or introduces Technique/Architecture/Model', 'research_paper', 'model_architecture', TRUE, 'Identify when a paper proposes new techniques or architectures.'),
-        (domain_uuid, 'evaluates_on', 'Evaluates On', 'Model/Technique is evaluated on Benchmark/Dataset', 'model_architecture', 'benchmark', TRUE, 'Identify evaluation relationships between models and benchmarks.'),
-        (domain_uuid, 'uses', 'Uses', 'Model/Technique uses/incorporates other Technique/Dataset/Tool', 'model_architecture', 'technique', TRUE, 'Identify usage relationships where a model incorporates other components.'),
-        (domain_uuid, 'compares_with', 'Compares With', 'Model/Technique is compared with another', 'model_architecture', 'model_architecture', FALSE, 'Identify comparative relationships between models.'),
-        (domain_uuid, 'extends', 'Extends', 'Model/Technique extends or builds upon another', 'model_architecture', 'model_architecture', TRUE, 'Identify extension relationships where one builds on another.'),
-        (domain_uuid, 'achieves', 'Achieves', 'Experiment/Model achieves performance on Benchmark', 'experiment', 'benchmark', TRUE, 'Identify performance achievements.')
+        (domain_uuid, 'works_at', 'Works At', 'Person works at Organization', 'person', 'organization', TRUE, 'Identify employment relationships between people and organizations.'),
+        (domain_uuid, 'located_in', 'Located In', 'Entity is located in Location', 'organization', 'location', TRUE, 'Identify geographic locations of organizations or entities.'),
+        (domain_uuid, 'related_to', 'Related To', 'General relationship between entities', NULL, NULL, FALSE, 'Identify general relationships between any entities.'),
+        (domain_uuid, 'part_of', 'Part Of', 'Entity is part of another entity', NULL, NULL, TRUE, 'Identify hierarchical or compositional relationships.'),
+        (domain_uuid, 'causes', 'Causes', 'One entity causes another', NULL, NULL, TRUE, 'Identify causal relationships between events or concepts.'),
+        (domain_uuid, 'influences', 'Influences', 'One entity influences another', NULL, NULL, TRUE, 'Identify influence relationships between entities.'),
+        (domain_uuid, 'collaborates_with', 'Collaborates With', 'Entities collaborate or work together', NULL, NULL, FALSE, 'Identify collaboration relationships between people or organizations.'),
+        (domain_uuid, 'competes_with', 'Competes With', 'Entities are competitors', 'organization', 'organization', FALSE, 'Identify competitive relationships between organizations.')
     ON CONFLICT (domain_id, name) DO NOTHING;
 END $$;

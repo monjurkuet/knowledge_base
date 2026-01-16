@@ -48,7 +48,7 @@ class ChatCompletionRequest:
         model: str,
         messages: list,
         tools: Optional[list] = None,
-        tool_choice: Optional[str] = "auto",
+        tool_choice: Optional[Any] = "auto",
         temperature: float = 0.7,
         max_tokens: int = 2000,
         stream: bool = False,

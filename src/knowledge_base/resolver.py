@@ -4,7 +4,7 @@ import psycopg
 from pydantic import BaseModel, Field
 
 from knowledge_base.config import get_config
-from knowledge_base.http_client import HTTPClient, ChatMessage, ChatCompletionRequest
+from knowledge_base.http_client import ChatCompletionRequest, ChatMessage, HTTPClient
 
 # Configure logging
 config = get_config()

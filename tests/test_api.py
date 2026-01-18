@@ -38,8 +38,8 @@ class TestIngestTextEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "success"
-        assert "Successfully ingested" in data["message"]
+        assert data["status"] == "started"
+        assert "Started ingestion" in data["message"]
 
     def test_ingest_text_empty_content(self, client, live_db):
         """Test ingestion with empty content"""
@@ -57,7 +57,7 @@ class TestIngestTextEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "success"
+        assert data["status"] == "started"
 
 
 class TestStatsEndpoint:

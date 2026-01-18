@@ -1,13 +1,14 @@
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
 
-from knowledge_base.config import get_config
 from psycopg import AsyncConnection
+
+from knowledge_base.config import get_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ async def migrate():
     config = get_config()
     conn_str = config.database.connection_string
 
-    logger.info(f"Connecting to database...")
+    logger.info("Connecting to database...")
 
     async with await AsyncConnection.connect(conn_str) as conn:
         async with conn.cursor() as cur:

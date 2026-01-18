@@ -35,9 +35,18 @@ class LLMConfig(BaseModel):
     api_key: str | None = Field(
         default_factory=lambda: os.getenv("OPENAI_API_KEY", "not-required")
     )
+    google_api_key: str | None = Field(
+        default_factory=lambda: os.getenv("GOOGLE_API_KEY", None)
+    )
     openai_api_base: str = Field(default="http://localhost:8317/v1")
     max_retries: int = Field(default=3)
     timeout: int = Field(default=120)
+    max_tokens: int = Field(default=3000)
+    temperature: float = Field(default=0.1)
+    extract_max_tokens: int = Field(default=3000)
+    extract_temperature: float = Field(default=0.1)
+    summarize_max_tokens: int = Field(default=3000)
+    summarize_temperature: float = Field(default=0.1)
 
 
 class APIConfig(BaseModel):

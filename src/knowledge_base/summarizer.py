@@ -1,13 +1,12 @@
 import asyncio
 import logging
-import os
 
-from google import genai
 from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
 
 from knowledge_base.config import get_config
-from knowledge_base.http_client import HTTPClient, ChatMessage, ChatCompletionRequest
+from knowledge_base.embedding_service import GoogleEmbeddingService
+from knowledge_base.http_client import ChatCompletionRequest, ChatMessage, HTTPClient
 
 # Configure logging
 config = get_config()
@@ -55,6 +54,7 @@ class CommunitySummarizer:
         self.db_conn_str = db_conn_str
         self.client = HTTPClient(base_url, api_key)
         self.model_name = model_name or config.llm.model_name
+        self.embedding_service = GoogleEmbeddingService()
 
     async def summarize_all(self):
         """
@@ -143,8 +143,8 @@ class CommunitySummarizer:
             request = ChatCompletionRequest(
                 model=self.model_name,
                 messages=messages,
-                max_tokens=3000,
-                temperature=0.1,
+                max_tokens=config.llm.summarize_max_tokens,
+                temperature=config.llm.summarize_temperature,
             )
 
             response = await self.client.chat_completion(request)
@@ -247,33 +247,9 @@ class CommunitySummarizer:
 
     async def _get_embedding(self, text: str) -> list[float]:
         """
-        Helper to get embeddings using Google GenAI.
+        Helper to get embeddings using GoogleEmbeddingService with consistent patterns.
         """
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY is missing. Cannot generate embeddings.")
-
-        client = genai.Client(api_key=api_key)
-
-        try:
-            result = client.models.embed_content(
-                model="text-embedding-004",
-                contents=text,
-            )
-            if not result or not hasattr(result, "embeddings") or not result.embeddings:
-                raise RuntimeError("API response is invalid or missing embeddings.")
-
-            embedding = result.embeddings[0]
-
-            if not hasattr(embedding, "values"):
-                raise RuntimeError("Embedding object is invalid or missing 'values'.")
-
-            if embedding.values is None:
-                raise ValueError("Embedding values are None.")
-
-            return embedding.values
-        except Exception as e:
-            raise RuntimeError(f"Google embedding API failed: {e}") from e
+        return await self.embedding_service.embed_content(text)
 
     async def _save_report(self, community_id: str, report: CommunityReport):
         """

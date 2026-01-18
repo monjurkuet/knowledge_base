@@ -1,12 +1,14 @@
 import asyncio
 import json
 import logging
-from typing import Sequence, Union, Any
+import re
+from collections.abc import Sequence
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from knowledge_base.config import get_config
-from knowledge_base.http_client import HTTPClient, ChatMessage, ChatCompletionRequest
+from knowledge_base.http_client import ChatCompletionRequest, ChatMessage, HTTPClient
 
 # Configure logging
 config = get_config()
@@ -109,8 +111,8 @@ class GraphIngestor:
     async def extract(
         self,
         text: str,
-        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
-        relationship_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        entity_types: Sequence[str | dict[str, Any]] | None = None,
+        relationship_types: Sequence[str | dict[str, Any]] | None = None,
     ) -> KnowledgeGraph:
         """
         High-Fidelity Extraction Pipeline (2-Pass Gleaning).
@@ -140,8 +142,8 @@ class GraphIngestor:
     async def _pass_1_core(
         self,
         text: str,
-        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
-        relationship_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        entity_types: Sequence[str | dict[str, Any]] | None = None,
+        relationship_types: Sequence[str | dict[str, Any]] | None = None,
     ) -> KnowledgeGraph:
         # Construct dynamic guidelines
         entity_guideline = "1. ENTITIES: Identify People, Organizations, Projects, Concepts, and Locations."
@@ -220,78 +222,11 @@ class GraphIngestor:
             ),
         ]
 
-        # Add function definition for structured output
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "extract_knowledge_graph",
-                    "description": "Extract entities, relationships, and events from text",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "entities": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                    },
-                                    "required": ["name", "type", "description"],
-                                },
-                            },
-                            "relationships": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "source": {"type": "string"},
-                                        "target": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "weight": {"type": "number"},
-                                    },
-                                    "required": [
-                                        "source",
-                                        "target",
-                                        "type",
-                                        "description",
-                                    ],
-                                },
-                            },
-                            "events": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "primary_entity": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "raw_time": {"type": "string"},
-                                        "normalized_date": {"type": "string"},
-                                    },
-                                    "required": [
-                                        "primary_entity",
-                                        "description",
-                                        "raw_time",
-                                    ],
-                                },
-                            },
-                        },
-                        "required": ["entities", "relationships", "events"],
-                    },
-                },
-            }
-        ]
-
         request = ChatCompletionRequest(
             model=self.model_name,
             messages=messages,
-            # tools=tools,
-            # tool_choice="auto",
-            max_tokens=3000,
-            temperature=0.1,
+            max_tokens=config.llm.extract_max_tokens,
+            temperature=config.llm.extract_temperature,
         )
 
         response = await self.client.chat_completion(request)
@@ -307,8 +242,6 @@ class GraphIngestor:
         if tool_calls:
             tool_call = tool_calls[0]
             try:
-                import json
-
                 arguments = json.loads(tool_call["function"]["arguments"])
                 # If arguments are not empty, use them
                 if arguments and (
@@ -316,7 +249,7 @@ class GraphIngestor:
                     or arguments.get("relationships")
                     or arguments.get("events")
                 ):
-                    logger.info(f"Successfully extracted via Tool Call.")
+                    logger.info("Successfully extracted via Tool Call.")
                     return KnowledgeGraph(**arguments)
                 else:
                     logger.warning(
@@ -328,9 +261,6 @@ class GraphIngestor:
         # Strategy 2: Fallback to Content Parsing (JSON in text)
         if content:
             try:
-                import json
-                import re
-
                 # Find JSON block
                 json_match = re.search(r"\{.*\}", content, re.DOTALL)
                 if json_match:
@@ -348,28 +278,11 @@ class GraphIngestor:
         )
         return KnowledgeGraph()
 
-        tool_call = tool_calls[0]
-        if tool_call["function"]["name"] != "extract_knowledge_graph":
-            logger.error(f"Unexpected tool call: {tool_call['function']['name']}")
-            return KnowledgeGraph()
-
-        try:
-            import json
-
-            arguments = json.loads(tool_call["function"]["arguments"])
-            logger.info(
-                f"DEBUG: Tool arguments received: {json.dumps(arguments, indent=2)}"
-            )
-            return KnowledgeGraph(**arguments)
-        except Exception as e:
-            logger.error(f"Failed to parse tool response: {e}")
-            return KnowledgeGraph()
-
     async def _pass_2_gleaning(
         self,
         text: str,
         existing_graph: KnowledgeGraph,
-        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        entity_types: Sequence[str | dict[str, Any]] | None = None,
     ) -> KnowledgeGraph:
         """
         The 'Zero Compromise' quality pass. Finds details missed in first pass.
@@ -470,7 +383,7 @@ class GraphIngestor:
             messages=messages,
             tools=tools,
             tool_choice="auto",
-            max_tokens=3000,
+            max_tokens=config.llm.extract_max_tokens,
         )
 
         response = await self.client.chat_completion(request)

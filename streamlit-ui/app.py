@@ -3,11 +3,10 @@ Streamlit UI for the Knowledge Base GraphRAG system
 Connects to the FastAPI backend for real-time knowledge graph exploration
 """
 
-import os
 import asyncio
 import json
+import os
 import uuid
-from collections import defaultdict
 from typing import Any, cast
 
 import networkx as nx
@@ -188,7 +187,6 @@ def main():
 
         st.header("🔍 Graph Filters")
         node_limit = st.slider("Max Nodes to Display", 10, 1000, 200)
-        node_type_filter = st.text_input("Filter by Node Type", "")
         show_labels = st.checkbox("Show Node Labels", True)
 
     tab1, tab2, tab3, tab4 = st.tabs(

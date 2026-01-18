@@ -2,12 +2,13 @@
 Shared HTTP client for OpenAI-compatible API calls
 """
 
-import asyncio
-import logging
-import httpx
 import json
-from typing import Optional, Any, Dict, List
+import logging
+from typing import Any
 
+import httpx
+
+from knowledge_base.circuit_breaker import CircuitBreaker
 from knowledge_base.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -19,9 +20,9 @@ class ChatMessage:
     def __init__(
         self,
         role: str,
-        content: Optional[str] = None,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        tool_call_id: Optional[str] = None,
+        content: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        tool_call_id: str | None = None,
     ):
         self.role = role
         self.content = content
@@ -30,7 +31,7 @@ class ChatMessage:
 
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization"""
-        result: Dict[str, Any] = {"role": self.role}
+        result: dict[str, Any] = {"role": self.role}
         if self.content is not None:
             result["content"] = self.content
         if self.tool_calls is not None:
@@ -47,8 +48,8 @@ class ChatCompletionRequest:
         self,
         model: str,
         messages: list,
-        tools: Optional[list] = None,
-        tool_choice: Optional[Any] = "auto",
+        tools: list | None = None,
+        tool_choice: Any | None = "auto",
         temperature: float = 0.7,
         max_tokens: int = 2000,
         stream: bool = False,
@@ -61,7 +62,7 @@ class ChatCompletionRequest:
         self.max_tokens = max_tokens
         self.stream = stream
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization"""
         result = {
             "model": self.model,
@@ -87,17 +88,20 @@ class HTTPClient:
     RETRY_DELAY = 3.0
     TIMEOUT_SECONDS = 30
 
-    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(self, base_url: str | None = None, api_key: str | None = None):
         config = get_config()
         self.api_url = (base_url or config.llm.openai_api_base).rstrip("/")
         self.api_key = api_key or config.llm.api_key
         self.timeout = httpx.Timeout(self.TIMEOUT_SECONDS)
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=5, recovery_timeout=60.0, name="llm_api_circuit_breaker"
+        )
 
     async def chat_completion(
         self, request: ChatCompletionRequest, stream: bool = False
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
-        Send chat completion request to API
+        Send chat completion request to API with circuit breaker protection
 
         Args:
             request: ChatCompletionRequest object
@@ -109,38 +113,28 @@ class HTTPClient:
         url = f"{self.api_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
 
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    if stream:
-                        return await self._stream_response(
-                            client, url, headers, request
-                        )
-                    else:
-                        response = await client.post(
-                            url,
-                            headers=headers,
-                            json=request.to_dict(),
-                        )
-                        response.raise_for_status()
-                        return response.json()
-            except httpx.TimeoutException:
-                logger.warning(f"Timeout attempt {attempt + 1}/{self.MAX_RETRIES}")
-                if attempt < self.MAX_RETRIES - 1:
-                    await asyncio.sleep(self.RETRY_DELAY * (2**attempt))
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Request failed: {error_msg}")
-                if (
-                    "model_not_supported" in error_msg.lower()
-                    or "The requested model is not supported" in error_msg
-                ):
-                    return {"error": {"message": "Model not supported"}}
-                if attempt < self.MAX_RETRIES - 1:
-                    await asyncio.sleep(self.RETRY_DELAY * (2**attempt))
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                if stream:
+                    return await self._stream_response(client, url, headers, request)
                 else:
-                    raise
-        return None
+                    response = await client.post(
+                        url,
+                        headers=headers,
+                        json=request.to_dict(),
+                    )
+                    response.raise_for_status()
+                    return response.json()
+
+        try:
+            return await self.circuit_breaker.call(_make_request)
+        except Exception as e:
+            logger.error(f"Request failed after circuit breaker: {e}")
+            if "model_not_supported" in str(
+                e
+            ).lower() or "The requested model is not supported" in str(e):
+                return {"error": {"message": "Model not supported"}}
+            raise
 
     async def _stream_response(
         self,
@@ -148,7 +142,7 @@ class HTTPClient:
         url: str,
         headers: dict,
         request: ChatCompletionRequest,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Handle streaming response"""
         async with client.stream(
             "POST", url, headers=headers, json=request.to_dict()

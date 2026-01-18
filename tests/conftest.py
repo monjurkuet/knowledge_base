@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from psycopg import AsyncConnection, sql
+from psycopg import AsyncConnection
 from rich.console import Console
 
 from knowledge_base.community import CommunityDetector
@@ -61,12 +61,12 @@ async def setup_database():
         schema_path = ROOT_DIR / "database/schema.sql"
         migration_path = ROOT_DIR / "database/schema_migration_001_multi_domain.sql"
 
-        with open(schema_path, "r") as f:
+        with open(schema_path) as f:
             await cur.execute(f.read())  # type: ignore[arg-type]
 
         # The migration script might have issues if run on a fresh schema,
         # but we include it for completeness. It's idempotent.
-        with open(migration_path, "r") as f:
+        with open(migration_path) as f:
             await cur.execute(f.read())  # type: ignore[arg-type]
 
         await conn.commit()

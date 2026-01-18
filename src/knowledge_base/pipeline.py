@@ -1,17 +1,17 @@
 import argparse
 import asyncio
 import logging
-import os
-from google import genai
 
 from dotenv import load_dotenv
 
 from knowledge_base.community import CommunityDetector
 from knowledge_base.config import get_config
 from knowledge_base.domain_detector import get_domain_detector
+from knowledge_base.embedding_service import GoogleEmbeddingService
 from knowledge_base.ingestor import GraphIngestor, KnowledgeGraph
-from knowledge_base.resolver import EntityResolver
 from knowledge_base.log_emitter import emit_log
+from knowledge_base.resolver import EntityResolver
+from knowledge_base.summarizer import CommunitySummarizer
 
 load_dotenv()
 
@@ -36,6 +36,7 @@ class KnowledgePipeline:
         self.community_detector = CommunityDetector(
             db_conn_str=self.config.database.connection_string
         )
+        self.embedding_service = GoogleEmbeddingService()
 
     async def run(
         self,
@@ -72,11 +73,11 @@ class KnowledgePipeline:
                 )
                 if channel_id:
                     if detected_domain_uuid:
-                        await emit_log(channel_id, f"Domain assigned successfully.")
+                        await emit_log(channel_id, "Domain assigned successfully.")
                     else:
                         await emit_log(
                             channel_id,
-                            f"Using default domain (domain detection failed).",
+                            "Using default domain (domain detection failed).",
                         )
 
                 # Convert UUID to string for database operations
@@ -151,8 +152,6 @@ class KnowledgePipeline:
             # 6. Recursive Summarization
             if channel_id:
                 await emit_log(channel_id, "--- Stage 5: Recursive Summarization ---")
-            from knowledge_base.summarizer import CommunitySummarizer
-
             summarizer = CommunitySummarizer(self.db_conn_str)
             await summarizer.summarize_all()
             if channel_id:
@@ -271,34 +270,9 @@ class KnowledgePipeline:
 
     async def _get_embedding(self, text: str) -> list[float]:
         """
-        Helper to get embeddings using Google GenAI.
+        Helper to get embeddings using GoogleEmbeddingService with consistent patterns.
         """
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY is missing. Cannot generate embeddings.")
-
-        client = genai.Client(api_key=api_key)
-
-        try:
-            client = genai.Client(api_key=api_key)
-            result = client.models.embed_content(
-                model="text-embedding-004",
-                contents=text,
-            )
-            if not result or not hasattr(result, "embeddings") or not result.embeddings:
-                raise RuntimeError("API response is invalid or missing embeddings.")
-
-            embedding = result.embeddings[0]
-
-            if not hasattr(embedding, "values"):
-                raise RuntimeError("Embedding object is invalid or missing 'values'.")
-
-            if embedding.values is None:
-                raise ValueError("Embedding values are None.")
-
-            return embedding.values
-        except Exception as e:
-            raise RuntimeError(f"Google embedding API failed: {e}") from e
+        return await self.embedding_service.embed_content(text)
 
 
 def main():

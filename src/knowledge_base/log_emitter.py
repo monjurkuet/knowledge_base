@@ -3,6 +3,7 @@ Utility for emitting real-time log messages via WebSockets.
 """
 
 import logging
+
 from knowledge_base.websocket import manager
 
 logger = logging.getLogger(__name__)

@@ -4,23 +4,21 @@ Automatically detects appropriate domains based on content analysis and manages
 domain creation/updating without user intervention.
 """
 
-import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from psycopg import AsyncConnection
 
 from knowledge_base.config import get_config
 from knowledge_base.domain import (
-    DomainCreate,
     DomainManager,
     DomainTemplate,
-    ExtractionConfig,
     EntityTypeTemplate,
+    ExtractionConfig,
     RelationshipTypeTemplate,
 )
-from knowledge_base.http_client import HTTPClient, ChatMessage, ChatCompletionRequest
+from knowledge_base.http_client import ChatCompletionRequest, ChatMessage, HTTPClient
 
 logger = logging.getLogger(__name__)
 config = get_config()
@@ -138,7 +136,7 @@ class DomainDetector:
         """Get async database connection."""
         return await AsyncConnection.connect(self.db_conn_str)
 
-    async def detect_domain_from_text(self, text: str) -> Optional[DomainTemplate]:
+    async def detect_domain_from_text(self, text: str) -> DomainTemplate | None:
         """
         Analyze text content and detect the most appropriate domain.
 
@@ -280,7 +278,7 @@ class DomainDetector:
             "ui_config": {},
         }
 
-    async def get_or_create_domain_for_text(self, text: str) -> Optional[UUID]:
+    async def get_or_create_domain_for_text(self, text: str) -> UUID | None:
         """
         Get existing domain or create new domain based on text content.
 
@@ -358,7 +356,7 @@ class DomainDetector:
 
 
 # Global domain detector instance
-_domain_detector: Optional[DomainDetector] = None
+_domain_detector: DomainDetector | None = None
 
 
 def get_domain_detector() -> DomainDetector:

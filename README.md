@@ -2,6 +2,14 @@
 
 This directory contains the high-fidelity **Agentic GraphRAG** ingestion and management system. It extends standard RAG by adding structured relationships, hierarchical community summaries, and chronological timelines. The system provides both a REST API and web interface for knowledge graph exploration and management.
 
+## 🎨 **New Modern UI - Bun + SolidJS + Sigma.js**
+
+The system now features a **modern, high-performance web interface** built with:
+- **Bun 1.1+** - Ultra-fast JavaScript runtime (4-7x faster than Node.js)
+- **SolidJS 1.8+** - Reactive UI framework (85% smaller bundles than React)
+- **Sigma.js 2.0+** - WebGL-powered graph visualization (handles 10,000+ nodes)
+- **WebSocket Support** - Real-time updates and live ingestion logs
+
 ## ✅ **API Migration Completed - Now Using Real OpenAI-Compatible API**
 
 This system now uses **real OpenAI-compatible API calls** instead of mocks, pointing to `http://localhost:8317/v1` with no API key required.
@@ -32,7 +40,7 @@ GOOGLE_API_KEY=your_google_api_key_here
 - **Recursive Summarization:** Automatically generates "Intelligence Reports" for every community. Parent communities summarize their children, creating a searchable map of knowledge.
 - **Temporal Tracking:** Extracts specific events and dates to build structured timelines.
 - **REST API:** Complete FastAPI-based REST API for programmatic access.
-- **Web Interface:** Modern Streamlit-based UI for interactive exploration.
+- **Modern Web Interface:** Bun + SolidJS + Sigma.js UI with real-time graph visualization.
 - **Real-time Updates:** WebSocket support for progress tracking during long operations.
 - **Production Ready:** Enterprise-grade configuration, logging, and deployment options.
 
@@ -54,9 +62,10 @@ The system consists of three main layers:
 - `config.py`: Configuration management system
 
 ### 3. User Interface Layer
-- `streamlit-ui/app.py`: Web-based interface for exploration and management
-- Interactive graph visualization, search, and content ingestion
-- Real-time progress feedback via WebSocket
+- `knowledge-base-ui/`: Modern Bun + SolidJS + Sigma.js web interface
+- Interactive WebGL-powered graph visualization
+- Real-time search, domain management, and content ingestion
+- Live WebSocket logs for ingestion progress
 
 ### 4. Supporting Components
 - `visualize.py`: CLI visualization tools
@@ -104,12 +113,11 @@ The API will be available at `http://localhost:8000` with documentation at `http
 
 ### 5. Start the Web Interface
 ```bash
-cd streamlit-ui
-uv run streamlit run app.py
-# Or if Streamlit is installed via extras:
-uv run --with streamlit streamlit run streamlit-ui/app.py
+cd knowledge-base-ui
+bun install
+bun run dev
 ```
-The web interface will be available at `http://localhost:8501`
+The web interface will be available at `http://localhost:5173`
 
 ### 6. Alternative: CLI Visualization
 ```bash
@@ -178,49 +186,53 @@ The system uses PostgreSQL with `pgvector`. See `schema.sql` for table definitio
 
 ## Web Interface
 
-The Streamlit-based web interface provides:
+The modern Bun + SolidJS + Sigma.js web interface provides:
 
 ### Dashboard
-- Real-time database statistics
-- Quick access to operations
-
-### Search & Exploration
-- Full-text search across knowledge graph
-- Interactive graph visualization with Plotly
-- Community analysis and exploration
-
-### Content Ingestion
-- Direct text input
-- File upload support
-- Real-time processing feedback
+- Real-time database statistics (nodes, edges, communities, events)
+- Live updates every 5 seconds
 
 ### Graph Visualization
-- Interactive network graphs
-- Node type filtering
-- Community highlighting
+- WebGL-powered interactive graph (handles 10,000+ nodes)
+- Multiple layout options (Circular, Random, Force Atlas)
+- Node filtering by type (entities, concepts, events, relations)
+- Zoom, pan, and click interactions
+
+### Search
+- Full-text search with scoring
+- Type-colored results
+- Direct access to entity details
+
+### Domains
+- View and manage domain schemas
+- Schema field definitions
+- Node and edge counts per domain
+
+### Content Ingestion
+- Direct text input with real-time processing
+- Live WebSocket logs showing pipeline progress
+- Connection status indicators
+- Processing stage tracking
 
 ## Documentation
 
-- **[API Documentation](docs/API_DOCUMENTATION.md)** - Complete API reference with endpoints, request/response formats, and examples
-- **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** - Production deployment instructions, scaling, and monitoring
+- **[API Documentation](docs/API.md)** - Complete API reference with endpoints, request/response formats, and examples
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and component design
+- **[UI Setup Guide](knowledge-base-ui/README.md)** - Bun + SolidJS UI installation and usage
 - **[Environment Configuration](.env.template)** - Template for environment variables
 - **[Database Schema](database/schema.sql)** - PostgreSQL schema with pgvector extensions
-- **[Design Document](docs/DESIGN.md)** - Architecture and implementation details
-- **[Codebase Architecture](docs/CODEBASE_ARCHITECTURE.md)** - Complete codebase structure and component guide
-- **[Production Readiness](docs/PRODUCTION_READINESS_SUMMARY.md)** - Production readiness assessment and improvements
 
 ## Technology Stack
 
 - **Language**: Python 3.12+
-- **Package Manager**: uv (always use `uv` for dependency management)
+- **Package Manager**: uv (Python), bun (JavaScript)
 - **Backend**: FastAPI with uvicorn
 - **Database**: PostgreSQL with pgvector extension
 - **LLM**: OpenAI-compatible API (http://localhost:8317/v1)
 - **Embeddings**: Google text-embedding-004 model via Google Generative AI
-- **Frontend**: Streamlit (optional dependency)
+- **Frontend**: Bun + SolidJS + Sigma.js (WebGL graph visualization)
 - **Testing**: pytest with pytest-asyncio
-- **Linting**: Ruff (replaces flake8, black, isort)
-- **Type Hints**: All functions must have type hints
+- **Linting**: Ruff (Python), TypeScript (JavaScript)
 
 ## Code Style Guidelines
 

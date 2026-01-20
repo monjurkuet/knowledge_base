@@ -3,12 +3,13 @@ Utility for emitting real-time log messages via WebSockets.
 """
 
 import logging
+
 from knowledge_base.websocket import manager
 
 logger = logging.getLogger(__name__)
 
 
-async def emit_log(channel_id: str, message: str, log_type: str = "info"):
+async def emit_log(channel_id: str, message: str, log_type: str = "info") -> None:
     """
     Emits a structured log message to a specific WebSocket channel.
 

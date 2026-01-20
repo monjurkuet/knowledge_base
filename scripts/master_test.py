@@ -28,7 +28,7 @@ class MasterKBTest:
         config = get_config()
         self.db_conn_str = config.database.connection_string
         self.pipeline = KnowledgePipeline()
-        self.data_dir = "knowledge_base/tests/data"
+        self.data_dir = "tests/data"
 
     async def reset_db(self):
         """Wipes the DB for a clean test run."""

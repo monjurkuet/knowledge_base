@@ -20,7 +20,7 @@ tests/.env
 # Log files
 *.log
 api.log
-streamlit.log
+ui.log
 
 # Development and test artifacts
 test_*.py
@@ -38,5 +38,15 @@ test_*.py
 *clean*.py
 *run_*.py
 
-# Streamlit cache
-.streamlit/
+# Node.js / UI
+node_modules/
+bun.lock
+package.json
+package-lock.json
+*.lock
+
+# UI build artifacts
+knowledge-base-ui/node_modules/
+knowledge-base-ui/dist/
+knowledge-base-ui/.vite/
+knowledge-base-ui/ui.log

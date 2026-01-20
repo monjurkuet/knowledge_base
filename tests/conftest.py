@@ -1,175 +1,141 @@
-from contextlib import asynccontextmanager
-from pathlib import Path
+"""
+Test configuration and fixtures
+"""
 
-import numpy as np
+import asyncio
+import os
+from typing import AsyncGenerator, Generator
+
 import pytest
-from psycopg import AsyncConnection, sql
-from rich.console import Console
+from fastapi.testclient import TestClient
 
-from knowledge_base.community import CommunityDetector
-from knowledge_base.config import get_config
-from knowledge_base.ingestor import GraphIngestor
-from knowledge_base.pipeline import KnowledgePipeline
-from knowledge_base.resolver import EntityResolver
-from knowledge_base.summarizer import CommunitySummarizer
-
-config = get_config()
-console = Console()
+os.environ["GOOGLE_API_KEY"] = "test_key"
+os.environ["DB_HOST"] = "localhost"
+os.environ["DB_PORT"] = "5432"
+os.environ["DB_NAME"] = "test_knowledge_base"
+os.environ["DB_USER"] = "agentzero"
 
 
-@asynccontextmanager
-async def get_live_db_connection():
-    """Get a live database connection for integration tests"""
-    conn = await AsyncConnection.connect(config.database.connection_string)
+@pytest.fixture
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create an instance of the default event loop for the test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def setup_test_database():
+    """Create and initialize test database"""
+    import psycopg
+
+    print("\n=== Setting up test database ===")
+
+    conn = await psycopg.AsyncConnection.connect(
+        "postgresql://agentzero@localhost:5432/postgres", autocommit=True
+    )
+
     try:
-        yield conn
+        await conn.execute("DROP DATABASE IF EXISTS test_knowledge_base WITH (FORCE)")
+        await conn.execute("CREATE DATABASE test_knowledge_base")
+        print("✓ Test database created")
+    except Exception as e:
+        print(f"Error creating database: {e}")
+        await conn.close()
+        raise
+    finally:
+        await conn.close()
+
+    conn = await psycopg.AsyncConnection.connect(
+        "postgresql://agentzero@localhost:5432/test_knowledge_base"
+    )
+    try:
+        schema_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "database",
+            "schema.sql",
+        )
+        with open(schema_path) as f:
+            await conn.execute(f.read())
+        await conn.commit()
+        print("✓ Schema initialized")
+    except Exception as e:
+        print(f"Error initializing schema: {e}")
+        await conn.close()
+        raise
     finally:
         await conn.close()
 
 
 @pytest.fixture
-async def db_conn():
-    """Provide async database connection for tests"""
-    conn = await AsyncConnection.connect(config.database.connection_string)
+async def db_transaction():
+    """Wrap each test in a transaction for isolation"""
+    import psycopg
+    from knowledge_base.config import get_config
+
+    config = get_config()
+    conn = await psycopg.AsyncConnection.connect(config.database.connection_string)
+
+    try:
+        await conn.execute("BEGIN")
+        yield conn
+    finally:
+        await conn.execute("ROLLBACK")
+        await conn.close()
+
+
+@pytest.fixture
+def client() -> Generator[TestClient, None, None]:
+    """Create a test client for the FastAPI app."""
+    from knowledge_base.api import app
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+async def db_connection() -> AsyncGenerator:
+    """Create a database connection for testing."""
+    import psycopg
+    from knowledge_base.config import get_config
+
+    config = get_config()
+    conn = await psycopg.AsyncConnection.connect(config.database.connection_string)
     yield conn
     await conn.close()
 
 
-config = get_config()
-console = Console()
-
-ROOT_DIR = Path(__file__).parent.parent
-
-
-@pytest.fixture(scope="session")
-async def setup_database():
-    """Session-scoped fixture to set up the database schema once."""
-    conn = await AsyncConnection.connect(config.database.connection_string)
-    async with conn.cursor() as cur:
-        # Drop all tables to start fresh
-        await cur.execute("""
-            DO $$ DECLARE
-                r RECORD;
-            BEGIN
-                FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-                    EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
-                END LOOP;
-            END $$;
-        """)
-
-        # Read and execute schema files
-        schema_path = ROOT_DIR / "database/schema.sql"
-        migration_path = ROOT_DIR / "database/schema_migration_001_multi_domain.sql"
-
-        with open(schema_path, "r") as f:
-            await cur.execute(f.read())  # type: ignore[arg-type]
-
-        # The migration script might have issues if run on a fresh schema,
-        # but we include it for completeness. It's idempotent.
-        with open(migration_path, "r") as f:
-            await cur.execute(f.read())  # type: ignore[arg-type]
-
-        await conn.commit()
-    await conn.close()
+@pytest.fixture
+def sample_text() -> str:
+    """Sample text for ingestion tests."""
+    return """
+    TechCorp is a technology company founded in 2010.
+    Alice Chen is a Senior Software Engineer at TechCorp.
+    Bob Smith is the Product Manager.
+    Project Alpha is their AI research initiative.
+    """
 
 
 @pytest.fixture
-async def live_db(setup_database):
-    """Provide live database connection with automatic cleanup, ensuring schema exists."""
-    conn = await AsyncConnection.connect(config.database.connection_string)
-    async with conn.cursor() as cur:
-        # Truncate tables before the test runs for a clean slate
-        await cur.execute(
-            "TRUNCATE domains, nodes, edges, communities, community_membership, community_hierarchy, events CASCADE"
-        )
-        await conn.commit()
-    yield conn
-    # The connection is closed automatically by the test function's teardown
-    await conn.close()
-
-
-@pytest.fixture
-async def seeded_db(live_db):
-    """Provide a database with sample test data"""
-    async with live_db.cursor() as cur:
-        # Add a default domain for fk constraints
-        await cur.execute(
-            "INSERT INTO domains (id, name, display_name, description) VALUES (%s, %s, %s, %s)",
-            (
-                "11111111-1111-1111-1111-111111111111",
-                "Default Domain",
-                "Default Domain",
-                "A domain for testing",
-            ),
-        )
-
-        embedding_1 = np.random.rand(768).tolist()
-        embedding_2 = np.random.rand(768).tolist()
-        embedding_3 = np.random.rand(768).tolist()
-
-        await cur.execute(
-            "INSERT INTO nodes (id, name, type, description, embedding, domain_id) VALUES (%s, %s, %s, %s, %s, %s), (%s, %s, %s, %s, %s, %s), (%s, %s, %s, %s, %s, %s)",
-            (
-                "11111111-1111-1111-1111-111111111111",
-                "Test Entity 1",
-                "Person",
-                "A test person",
-                embedding_1,
-                "11111111-1111-1111-1111-111111111111",
-                "22222222-2222-2222-2222-222222222222",
-                "Test Entity 2",
-                "Organization",
-                "A test company",
-                embedding_2,
-                "11111111-1111-1111-1111-111111111111",
-                "33333333-3333-3333-3333-333333333333",
-                "Test Entity 3",
-                "Concept",
-                "A test idea",
-                embedding_3,
-                "11111111-1111-1111-1111-111111111111",
-            ),
-        )
-        await live_db.commit()
-    yield live_db
-
-
-@pytest.fixture
-async def pipeline():
-    """Provide KnowledgePipeline instance for tests"""
-    return KnowledgePipeline()
-
-
-@pytest.fixture
-async def ingestor():
-    """Provide GraphIngestor instance for tests"""
-    return GraphIngestor(model_name=config.llm.model_name)
-
-
-@pytest.fixture
-async def resolver():
-    """Provide EntityResolver instance for tests"""
-    return EntityResolver(
-        db_conn_str=config.database.connection_string,
-        model_name=config.llm.model_name,
-    )
-
-
-@pytest.fixture
-async def community_detector():
-    """Provide CommunityDetector instance for tests"""
-    return CommunityDetector(db_conn_str=config.database.connection_string)
-
-
-@pytest.fixture
-async def summarizer():
-    """Provide CommunitySummarizer instance for tests"""
-    return CommunitySummarizer(
-        config.database.connection_string, model_name=config.llm.model_name
-    )
-
-
-@pytest.fixture(scope="session")
-def test_data_dir():
-    """Path to test data directory"""
-    return Path(__file__).parent / "data"
+def sample_graph_data():
+    """Sample graph data for testing."""
+    return {
+        "entities": [
+            {
+                "name": "Test Company",
+                "type": "organization",
+                "description": "A test company",
+            },
+            {"name": "John Doe", "type": "person", "description": "A test person"},
+        ],
+        "relationships": [
+            {
+                "source": "John Doe",
+                "target": "Test Company",
+                "type": "WORKS_FOR",
+                "description": "John works at Test Company",
+                "weight": 1.0,
+            }
+        ],
+        "events": [],
+    }

@@ -1,12 +1,14 @@
 import asyncio
 import json
 import logging
-from typing import Sequence, Union, Any
+from collections.abc import Sequence
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from knowledge_base.config import get_config
-from knowledge_base.http_client import HTTPClient, ChatMessage, ChatCompletionRequest
+from knowledge_base.http_client import ChatCompletionRequest, ChatMessage, HTTPClient
+from knowledge_base.utils.errors import IngestionError, LLMError
 
 # Configure logging
 config = get_config()
@@ -103,14 +105,17 @@ class GraphIngestor:
                 response.raise_for_status()
                 return [m["id"] for m in response.json().get("data", [])]
         except Exception as e:
-            logger.error(f"Failed to list models: {e}")
-            return []
+            raise LLMError(
+                "Failed to list available models",
+                model=self.model_name,
+                details={"error": str(e)},
+            ) from e
 
     async def extract(
         self,
         text: str,
-        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
-        relationship_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        entity_types: Sequence[str | dict[str, Any]] | None = None,
+        relationship_types: Sequence[str | dict[str, Any]] | None = None,
     ) -> KnowledgeGraph:
         """
         High-Fidelity Extraction Pipeline (2-Pass Gleaning).
@@ -122,26 +127,33 @@ class GraphIngestor:
         core_graph = await self._pass_1_core(text, entity_types, relationship_types)
         logger.info(f"Pass 1 complete. Found {len(core_graph.entities)} entities.")
 
-        # Pass 2: Gleaning (Finding missed details)
-        # For gleaning, we might want to pass the types again, but for now let's keep it simple
-        gleaned_graph = await self._pass_2_gleaning(text, core_graph, entity_types)
-        logger.info(
-            f"Pass 2 complete. Found {len(gleaned_graph.entities)} additional entities."
-        )
+        # Pass 2: Gleaning (Finding missed details) - Made optional
+        try:
+            # For gleaning, we might want to pass the types again, but for now let's keep it simple
+            gleaned_graph = await self._pass_2_gleaning(text, core_graph, entity_types)
+            logger.info(
+                f"Pass 2 complete. Found {len(gleaned_graph.entities)} additional entities."
+            )
 
-        # Merge
-        final_graph = self._merge_graphs(core_graph, gleaned_graph)
-        logger.info(
-            f"Extraction complete. Final count: {len(final_graph.entities)} entities, {len(final_graph.relationships)} relationships."
-        )
+            # Merge
+            final_graph = self._merge_graphs(core_graph, gleaned_graph)
+            logger.info(
+                f"Extraction complete. Final count: {len(final_graph.entities)} entities, {len(final_graph.relationships)} relationships."
+            )
 
-        return final_graph
+            return final_graph
+        except Exception as e:
+            logger.warning(f"Pass 2 gleaning failed, using pass 1 results only: {e}")
+            logger.info(
+                f"Extraction complete (pass 1 only). Final count: {len(core_graph.entities)} entities, {len(core_graph.relationships)} relationships."
+            )
+            return core_graph
 
     async def _pass_1_core(
         self,
         text: str,
-        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
-        relationship_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        entity_types: Sequence[str | dict[str, Any]] | None = None,
+        relationship_types: Sequence[str | dict[str, Any]] | None = None,
     ) -> KnowledgeGraph:
         # Construct dynamic guidelines
         entity_guideline = "1. ENTITIES: Identify People, Organizations, Projects, Concepts, and Locations."
@@ -220,71 +232,6 @@ class GraphIngestor:
             ),
         ]
 
-        # Add function definition for structured output
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "extract_knowledge_graph",
-                    "description": "Extract entities, relationships, and events from text",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "entities": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                    },
-                                    "required": ["name", "type", "description"],
-                                },
-                            },
-                            "relationships": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "source": {"type": "string"},
-                                        "target": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "weight": {"type": "number"},
-                                    },
-                                    "required": [
-                                        "source",
-                                        "target",
-                                        "type",
-                                        "description",
-                                    ],
-                                },
-                            },
-                            "events": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "primary_entity": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "raw_time": {"type": "string"},
-                                        "normalized_date": {"type": "string"},
-                                    },
-                                    "required": [
-                                        "primary_entity",
-                                        "description",
-                                        "raw_time",
-                                    ],
-                                },
-                            },
-                        },
-                        "required": ["entities", "relationships", "events"],
-                    },
-                },
-            }
-        ]
-
         request = ChatCompletionRequest(
             model=self.model_name,
             messages=messages,
@@ -296,8 +243,11 @@ class GraphIngestor:
 
         response = await self.client.chat_completion(request)
         if not response or "choices" not in response:
-            logger.error("No response from API")
-            return KnowledgeGraph()
+            raise LLMError(
+                "No response from API",
+                model=self.model_name,
+                details={"response": str(response)},
+            )
 
         message = response["choices"][0]["message"]
         tool_calls = message.get("tool_calls", [])
@@ -316,14 +266,18 @@ class GraphIngestor:
                     or arguments.get("relationships")
                     or arguments.get("events")
                 ):
-                    logger.info(f"Successfully extracted via Tool Call.")
+                    logger.info("Successfully extracted via Tool Call.")
                     return KnowledgeGraph(**arguments)
                 else:
                     logger.warning(
                         "Tool call received but arguments were empty. Attempting fallback to content parsing."
                     )
             except Exception as e:
-                logger.error(f"Failed to parse tool response: {e}")
+                raise LLMError(
+                    "Failed to parse tool response",
+                    model=self.model_name,
+                    details={"error": str(e), "tool_call": str(tool_call)},
+                ) from e
 
         # Strategy 2: Fallback to Content Parsing (JSON in text)
         if content:
@@ -341,12 +295,17 @@ class GraphIngestor:
                     )
                     return KnowledgeGraph(**data)
             except Exception as e:
-                logger.error(f"Failed to parse content JSON: {e}")
+                raise IngestionError(
+                    "Failed to parse content JSON",
+                    stage="extraction",
+                    details={"error": str(e), "content": content[:500]},
+                ) from e
 
-        logger.error(
-            f"Extraction failed. No valid JSON found in tool calls or content. Raw content: {content}"
+        raise IngestionError(
+            "No valid JSON found in tool calls or content",
+            stage="extraction",
+            details={"content": content[:500] if content else None},
         )
-        return KnowledgeGraph()
 
         tool_call = tool_calls[0]
         if tool_call["function"]["name"] != "extract_knowledge_graph":
@@ -369,7 +328,7 @@ class GraphIngestor:
         self,
         text: str,
         existing_graph: KnowledgeGraph,
-        entity_types: Sequence[Union[str, dict[str, Any]]] | None = None,
+        entity_types: Sequence[str | dict[str, Any]] | None = None,
     ) -> KnowledgeGraph:
         """
         The 'Zero Compromise' quality pass. Finds details missed in first pass.
@@ -379,7 +338,7 @@ class GraphIngestor:
         messages = [
             ChatMessage(
                 role="system",
-                content="You are a Detail-Oriented Forensic Auditor. Your goal is to find missed entities, subtle relationships, and overlooked TEMPORAL EVENTS.",
+                content="You are a JSON-only extraction engine. You do not speak. You do not offer help. You only output valid JSON matching the requested schema.",
             ),
             ChatMessage(
                 role="user",
@@ -387,115 +346,83 @@ class GraphIngestor:
                 I have already extracted these entities: {json.dumps(existing_names[:60])}.
                 
                 **Your Goal:**
-                Perform a second pass on text. Identify:
-                1. ANY entity or relationship not listed above.
-                2. Specific DATES or TIME-BOUND milestones that were skipped.
-                3. Chronological links between events.
+                Perform a second pass on the text below. Identify ONLY NEW information that was missed:
+                1. ANY entity or relationship not already listed above
+                2. Specific DATES or TIME-BOUND milestones that were skipped
+                3. Chronological links between events
                 
-                **Constraint:** Only output NEW information.
+                **CRITICAL INSTRUCTIONS:**
+                - ONLY output NEW entities, relationships, and events (not already in the existing list)
+                - Output ONLY a valid JSON object
+                - Do NOT include markdown formatting (like ```json)
+                - Do NOT include any introductory text
+                - If no new information is found, return empty arrays: {{"entities": [], "relationships": [], "events": []}}
                 
                 **Text to Analyze:**
                 {text}
+                
+                **Required JSON Structure:**
+                {{
+                    "entities": [
+                        {{"name": "NewEntityName", "type": "EntityType", "description": "Description..."}}
+                    ],
+                    "relationships": [
+                        {{"source": "EntityName", "target": "OtherEntity", "type": "RELATIONSHIP_TYPE", "description": "Context...", "weight": 1.0}}
+                    ],
+                    "events": [
+                        {{"primary_entity": "EntityName", "description": "Event description", "raw_time": "2024", "normalized_date": "2024-01-01"}}
+                    ]
+                }}
                 """,
             ),
-        ]
-
-        # Use same tool definition as pass 1
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "extract_knowledge_graph",
-                    "description": "Extract entities, relationships, and events from text",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "entities": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                    },
-                                    "required": ["name", "type", "description"],
-                                },
-                            },
-                            "relationships": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "source": {"type": "string"},
-                                        "target": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "weight": {"type": "number"},
-                                    },
-                                    "required": [
-                                        "source",
-                                        "target",
-                                        "type",
-                                        "description",
-                                    ],
-                                },
-                            },
-                            "events": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "primary_entity": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "raw_time": {"type": "string"},
-                                        "normalized_date": {"type": "string"},
-                                    },
-                                    "required": [
-                                        "primary_entity",
-                                        "description",
-                                        "raw_time",
-                                    ],
-                                },
-                            },
-                        },
-                        "required": ["entities", "relationships", "events"],
-                    },
-                },
-            }
         ]
 
         request = ChatCompletionRequest(
             model=self.model_name,
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
             max_tokens=3000,
         )
 
         response = await self.client.chat_completion(request)
         if not response or "choices" not in response:
-            logger.error("No response from API")
-            return KnowledgeGraph()
+            raise LLMError(
+                "No response from API",
+                model=self.model_name,
+                details={"response": str(response)},
+            )
 
         message = response["choices"][0]["message"]
-        tool_calls = message.get("tool_calls", [])
+        content = message.get("content", "")
 
-        if not tool_calls:
-            logger.error("No tool calls in response")
-            return KnowledgeGraph()
-
-        tool_call = tool_calls[0]
-        if tool_call["function"]["name"] != "extract_knowledge_graph":
-            logger.error(f"Unexpected tool call: {tool_call['function']['name']}")
-            return KnowledgeGraph()
+        if not content:
+            raise LLMError(
+                "Empty response from API",
+                model=self.model_name,
+                details={"message": str(message)},
+            )
 
         try:
-            arguments = json.loads(tool_call["function"]["arguments"])
-            return KnowledgeGraph(**arguments)
+            import re
+
+            # Extract JSON from response
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                data = json.loads(json_str)
+                logger.info("Successfully extracted via JSON parsing in pass 2.")
+                return KnowledgeGraph(**data)
+            else:
+                logger.warning(f"No JSON found in pass 2 response: {content[:100]}")
+                return KnowledgeGraph()
         except Exception as e:
-            logger.error(f"Failed to parse tool response: {e}")
-            return KnowledgeGraph()
+            raise IngestionError(
+                "Failed to parse JSON response in pass 2",
+                stage="gleaning",
+                details={
+                    "error": str(e),
+                    "content": content[:500] if content else None,
+                },
+            ) from e
 
     def _merge_graphs(self, g1: KnowledgeGraph, g2: KnowledgeGraph) -> KnowledgeGraph:
         """
@@ -538,7 +465,7 @@ class GraphIngestor:
 # --- Usage Example ---
 if __name__ == "__main__":
 
-    async def run_test():
+    async def run_test() -> None:
         ingestor = GraphIngestor()
 
         sample_text = """

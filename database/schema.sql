@@ -209,7 +209,8 @@ CREATE TABLE events (
     timestamp TIMESTAMPTZ,
     raw_time_desc TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_events_unique UNIQUE (node_id, description, raw_time_desc)
 );
 
 -- ================================================================

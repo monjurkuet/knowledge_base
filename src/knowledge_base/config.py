@@ -44,8 +44,12 @@ class APIConfig(BaseModel):
     """API server configuration"""
 
     host: str = Field(default_factory=lambda: os.getenv("API_HOST", "0.0.0.0"))
-    port: int = Field(default_factory=lambda: int(os.getenv("API_PORT", "8000")))
-    cors_origins: list = Field(default_factory=lambda: ["*"])
+    port: int = Field(
+        default_factory=lambda: int(os.getenv("API_PORT", "8000")),
+        ge=1,
+        le=65535,
+    )
+    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     reload: bool = Field(
         default_factory=lambda: os.getenv("API_RELOAD", "false").lower() == "true"
     )
@@ -73,6 +77,24 @@ class LoggingConfig(BaseModel):
     )
 
 
+class ProcessingConfig(BaseModel):
+    """Batch processing configuration"""
+
+    embedding_batch_size: int = Field(
+        default_factory=lambda: int(os.getenv("EMBEDDING_BATCH_SIZE", "50")),
+        description="Number of entities to process per embedding batch",
+        gt=0,
+    )
+    summarization_batch_size: int = Field(
+        default_factory=lambda: int(os.getenv("SUMMARIZATION_BATCH_SIZE", "5")),
+        description="Number of communities to summarize per batch",
+    )
+    graph_page_size: int = Field(
+        default_factory=lambda: int(os.getenv("GRAPH_PAGE_SIZE", "10000")),
+        description="Number of nodes/edges to load per graph page",
+    )
+
+
 class Config(BaseModel):
     """Main configuration class"""
 
@@ -81,6 +103,7 @@ class Config(BaseModel):
     api: APIConfig = Field(default_factory=APIConfig)
     streamlit: StreamlitConfig = Field(default_factory=StreamlitConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    processing: ProcessingConfig = Field(default_factory=ProcessingConfig)
 
 
 config = Config()

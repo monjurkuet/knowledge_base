@@ -5,6 +5,7 @@ WebSocket implementation for real-time updates in the Knowledge Base API
 import asyncio
 import json
 import logging
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -14,10 +15,10 @@ logger = logging.getLogger(__name__)
 class ConnectionManager:
     """Manages WebSocket connections and broadcasts messages"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.active_connections: dict[str, set[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, channel: str = "general"):
+    async def connect(self, websocket: WebSocket, channel: str = "general") -> None:
         """Connect a WebSocket to a specific channel"""
         await websocket.accept()
 
@@ -29,7 +30,7 @@ class ConnectionManager:
             f"WebSocket connected to channel '{channel}'. Total connections: {len(self.active_connections[channel])}"
         )
 
-    def disconnect(self, websocket: WebSocket, channel: str = "general"):
+    def disconnect(self, websocket: WebSocket, channel: str = "general") -> None:
         """Disconnect a WebSocket from a channel"""
         if channel in self.active_connections:
             self.active_connections[channel].discard(websocket)
@@ -40,7 +41,9 @@ class ConnectionManager:
             if not self.active_connections[channel]:
                 del self.active_connections[channel]
 
-    async def broadcast(self, message: dict, channel: str = "general"):
+    async def broadcast(
+        self, message: dict[str, Any], channel: str = "general"
+    ) -> None:
         """Broadcast a message to all connections in a channel"""
         if channel not in self.active_connections:
             return
@@ -60,7 +63,7 @@ class ConnectionManager:
 
     async def send_progress(
         self, operation: str, progress: float, message: str, channel: str = "general"
-    ):
+    ) -> None:
         """Send progress update"""
         await self.broadcast(
             {
@@ -77,9 +80,9 @@ class ConnectionManager:
         self,
         operation: str,
         status: str,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
         channel: str = "general",
-    ):
+    ) -> None:
         """Send status update"""
         message = {
             "type": "status",
@@ -92,7 +95,9 @@ class ConnectionManager:
 
         await self.broadcast(message, channel)
 
-    async def send_error(self, operation: str, error: str, channel: str = "general"):
+    async def send_error(
+        self, operation: str, error: str, channel: str = "general"
+    ) -> None:
         """Send error message"""
         await self.broadcast(
             {
@@ -108,7 +113,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def websocket_endpoint(websocket: WebSocket, channel: str = "general"):
+async def websocket_endpoint(websocket: WebSocket, channel: str = "general") -> None:
     """WebSocket endpoint for real-time updates"""
     await manager.connect(websocket, channel)
 
@@ -163,24 +168,26 @@ async def websocket_endpoint(websocket: WebSocket, channel: str = "general"):
 class ProgressTracker:
     """Tracks progress of long-running operations"""
 
-    def __init__(self, operation: str, channel: str = "general"):
+    def __init__(self, operation: str, channel: str = "general") -> None:
         self.operation = operation
         self.channel = channel
         self.start_time = asyncio.get_event_loop().time()
 
-    async def update_progress(self, progress: float, message: str):
+    async def update_progress(self, progress: float, message: str) -> None:
         """Update progress (0.0 to 1.0)"""
         await manager.send_progress(self.operation, progress, message, self.channel)
 
-    async def update_status(self, status: str, details: dict | None = None):
+    async def update_status(
+        self, status: str, details: dict[str, Any] | None = None
+    ) -> None:
         """Update operation status"""
         await manager.send_status(self.operation, status, details, self.channel)
 
-    async def report_error(self, error: str):
+    async def report_error(self, error: str) -> None:
         """Report an error"""
         await manager.send_error(self.operation, error, self.channel)
 
-    async def complete(self, details: dict | None = None):
+    async def complete(self, details: dict[str, Any] | None = None) -> None:
         """Mark operation as completed"""
         elapsed = asyncio.get_event_loop().time() - self.start_time
         details = details or {}

@@ -2,16 +2,16 @@ import argparse
 import asyncio
 import logging
 import os
-from google import genai
 
 from dotenv import load_dotenv
+from google import genai
 
 from knowledge_base.community import CommunityDetector
 from knowledge_base.config import get_config
 from knowledge_base.domain_detector import get_domain_detector
 from knowledge_base.ingestor import GraphIngestor, KnowledgeGraph
-from knowledge_base.resolver import EntityResolver
 from knowledge_base.log_emitter import emit_log
+from knowledge_base.resolver import EntityResolver
 
 load_dotenv()
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class KnowledgePipeline:
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_config()
         self.db_conn_str = self.config.database.connection_string
         self.domain_detector = get_domain_detector()
@@ -42,7 +42,7 @@ class KnowledgePipeline:
         file_path: str,
         domain_id: str | None = None,
         channel_id: str | None = None,
-    ):
+    ) -> None:
         """
         Run the full High-Fidelity Pipeline on a single file.
         """
@@ -72,11 +72,11 @@ class KnowledgePipeline:
                 )
                 if channel_id:
                     if detected_domain_uuid:
-                        await emit_log(channel_id, f"Domain assigned successfully.")
+                        await emit_log(channel_id, "Domain assigned successfully.")
                     else:
                         await emit_log(
                             channel_id,
-                            f"Using default domain (domain detection failed).",
+                            "Using default domain (domain detection failed).",
                         )
 
                 # Convert UUID to string for database operations
@@ -171,26 +171,33 @@ class KnowledgePipeline:
         graph: KnowledgeGraph,
         domain_id: str | None = None,
         channel_id: str | None = None,
-    ):
+    ) -> None:
         """
         Resolves entities and inserts edges.
         """
         name_to_id = {}
 
-        # 1. Resolve Entities
+        # 1. Resolve Entities (with batch embedding)
         if channel_id:
             await emit_log(channel_id, f"Resolving {len(graph.entities)} entities...")
-        for i, entity in enumerate(graph.entities):
-            embedding = await self._get_embedding(f"{entity.name} {entity.description}")
 
-            entity_dict = entity.model_dump()
-            resolved_id = await self.resolver.resolve_and_insert(
-                entity_dict, embedding, domain_id
-            )
-            name_to_id[entity.name] = resolved_id
-            if channel_id and (i + 1) % 10 == 0:
+        batch_size = self.config.processing.embedding_batch_size
+        for i in range(0, len(graph.entities), batch_size):
+            batch = graph.entities[i : i + batch_size]
+            texts = [f"{entity.name} {entity.description}" for entity in batch]
+            embeddings = await self._get_embeddings_batch(texts)
+
+            for j, entity in enumerate(batch):
+                entity_dict = entity.model_dump()
+                resolved_id = await self.resolver.resolve_and_insert(
+                    entity_dict, embeddings[j], domain_id
+                )
+                name_to_id[entity.name] = resolved_id
+
+            if channel_id and (i + len(batch)) % 10 == 0:
                 await emit_log(
-                    channel_id, f"Resolved {i + 1}/{len(graph.entities)} entities..."
+                    channel_id,
+                    f"Resolved {i + len(batch)}/{len(graph.entities)} entities...",
                 )
 
         if channel_id:
@@ -273,6 +280,19 @@ class KnowledgePipeline:
         """
         Helper to get embeddings using Google GenAI.
         """
+        embeddings = await self._get_embeddings_batch([text])
+        return embeddings[0]
+
+    async def _get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        """
+        Get embeddings for multiple texts in a single batch request.
+
+        Args:
+            texts: List of texts to embed
+
+        Returns:
+            List of embedding vectors
+        """
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY is missing. Cannot generate embeddings.")
@@ -280,28 +300,29 @@ class KnowledgePipeline:
         client = genai.Client(api_key=api_key)
 
         try:
-            client = genai.Client(api_key=api_key)
             result = client.models.embed_content(
                 model="text-embedding-004",
-                contents=text,
+                contents=texts,
             )
             if not result or not hasattr(result, "embeddings") or not result.embeddings:
                 raise RuntimeError("API response is invalid or missing embeddings.")
 
-            embedding = result.embeddings[0]
+            embeddings = []
+            for embedding in result.embeddings:
+                if not hasattr(embedding, "values"):
+                    raise RuntimeError(
+                        "Embedding object is invalid or missing 'values'."
+                    )
+                if embedding.values is None:
+                    raise ValueError("Embedding values are None.")
+                embeddings.append(embedding.values)
 
-            if not hasattr(embedding, "values"):
-                raise RuntimeError("Embedding object is invalid or missing 'values'.")
-
-            if embedding.values is None:
-                raise ValueError("Embedding values are None.")
-
-            return embedding.values
+            return embeddings
         except Exception as e:
             raise RuntimeError(f"Google embedding API failed: {e}") from e
 
 
-def main():
+def main() -> None:
     """CLI entry point for the pipeline"""
     parser = argparse.ArgumentParser(description="Run Knowledge Base Pipeline")
     parser.add_argument("file", help="Path to text file to ingest")

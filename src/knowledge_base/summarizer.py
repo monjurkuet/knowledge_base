@@ -7,7 +7,8 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
 
 from knowledge_base.config import get_config
-from knowledge_base.http_client import HTTPClient, ChatMessage, ChatCompletionRequest
+from knowledge_base.http_client import ChatCompletionRequest, ChatMessage, HTTPClient
+from knowledge_base.utils.errors import LLMError, SummarizationError
 
 # Configure logging
 config = get_config()
@@ -56,7 +57,7 @@ class CommunitySummarizer:
         self.client = HTTPClient(base_url, api_key)
         self.model_name = model_name or config.llm.model_name
 
-    async def summarize_all(self):
+    async def summarize_all(self) -> None:
         """
         Main entry point: Summarize communities level by level, bottom-up.
         """
@@ -77,7 +78,7 @@ class CommunitySummarizer:
             logger.info(f"--- Processing Level {level} ---")
             await self._process_level(level)
 
-    async def _process_level(self, level: int):
+    async def _process_level(self, level: int) -> None:
         """
         Summarize all communities at a specific level.
         """
@@ -93,7 +94,7 @@ class CommunitySummarizer:
                 for comm_id, _ in communities:
                     await self._summarize_community(comm_id, level)
 
-    async def _summarize_community(self, community_id: str, level: int):
+    async def _summarize_community(self, community_id: str, level: int) -> None:
         """
         Generate a report for a single community.
         """
@@ -149,8 +150,11 @@ class CommunitySummarizer:
 
             response = await self.client.chat_completion(request)
             if not response or "choices" not in response:
-                logger.error("No response from API")
-                return None
+                raise LLMError(
+                    "No response from API",
+                    model=self.model_name,
+                    details={"community_id": community_id, "response": str(response)},
+                )
 
             message = response["choices"][0]["message"]
             content = message.get("content", "")
@@ -170,16 +174,35 @@ class CommunitySummarizer:
                     await self._save_report(community_id, report)
                     logger.info(f"Successfully generated report for {community_id}")
                 else:
-                    logger.error(
-                        f"No JSON found in response for {community_id}. Content: {content[:100]}..."
+                    raise SummarizationError(
+                        "No JSON found in response",
+                        community_id=community_id,
+                        level=level,
+                        details={"content": content[:100]},
                     )
 
+            except SummarizationError:
+                raise
             except Exception as e:
-                logger.error(f"Failed to parse summary response: {e}")
-                return None
+                raise SummarizationError(
+                    "Failed to parse summary response",
+                    community_id=community_id,
+                    level=level,
+                    details={
+                        "error": str(e),
+                        "content": content[:500] if content else None,
+                    },
+                ) from e
 
+        except SummarizationError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to summarize community {community_id}: {e}")
+            raise SummarizationError(
+                "Failed to summarize community",
+                community_id=community_id,
+                level=level,
+                details={"error": str(e)},
+            ) from e
 
     async def _gather_context(self, community_id: str, level: int) -> str:
         """
@@ -275,7 +298,7 @@ class CommunitySummarizer:
         except Exception as e:
             raise RuntimeError(f"Google embedding API failed: {e}") from e
 
-    async def _save_report(self, community_id: str, report: CommunityReport):
+    async def _save_report(self, community_id: str, report: CommunityReport) -> None:
         """
         Persist the generated report and its vector embedding.
         """
@@ -304,7 +327,7 @@ class CommunitySummarizer:
 # --- CLI Test ---
 if __name__ == "__main__":
 
-    async def main():
+    async def main() -> None:
         config = get_config()
         conn_str = config.database.connection_string
 

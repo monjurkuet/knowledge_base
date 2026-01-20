@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
@@ -9,7 +10,7 @@ from rich.tree import Tree
 load_dotenv()
 
 
-def fetch_hierarchy():
+def fetch_hierarchy() -> tuple[list[Any], list[Any], list[Any]]:
     """
     Fetch the entire community and node hierarchy from Postgres.
     """
@@ -36,7 +37,7 @@ def fetch_hierarchy():
     return communities, links, members
 
 
-def visualize():
+def visualize() -> None:
     console = Console()
     communities, links, members = fetch_hierarchy()
 
@@ -82,7 +83,7 @@ def visualize():
         max_level = max(c[2] for c in communities)
         roots = [cid for cid in comm_dict if comm_dict[cid]["level"] == max_level]
 
-    def add_to_tree(tree, comm_id):
+    def add_to_tree(tree: Tree, comm_id: str) -> None:
         data = comm_dict[comm_id]
 
         # Format the summary

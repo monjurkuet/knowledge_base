@@ -7,7 +7,7 @@ import logging
 
 import uvicorn
 
-from knowledge_base.api import app as fastapi_app
+from knowledge_base.api.app import app as fastapi_app
 from knowledge_base.config import get_config
 
 config = get_config()
@@ -17,8 +17,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+app = fastapi_app
 
-def main():
+
+def main() -> None:
     """Main entry point for the API server"""
     logger.info("Starting Knowledge Base API server...")
 
@@ -29,7 +31,7 @@ def main():
     logger.info(f"API documentation: http://{config.api.host}:{config.api.port}/docs")
 
     uvicorn.run(
-        fastapi_app,
+        app,
         host=config.api.host,
         port=config.api.port,
         reload=config.api.reload,

@@ -1,11 +1,13 @@
 import asyncio
 import logging
+from typing import Any
 
 import networkx as nx
 from graspologic.partition import hierarchical_leiden
 from psycopg import AsyncConnection
 
 from knowledge_base.config import get_config
+from knowledge_base.utils.errors import CommunityDetectionError
 
 # Configure logging
 config = get_config()
@@ -18,32 +20,58 @@ logger = logging.getLogger(__name__)
 class CommunityDetector:
     def __init__(self, db_conn_str: str):
         self.db_conn_str = db_conn_str
+        self.page_size = config.processing.graph_page_size
 
     async def load_graph(self) -> nx.Graph:
         """
         Load the entire active knowledge graph from Postgres into NetworkX.
+        Uses pagination to reduce memory usage for large graphs.
         """
         logger.info("Loading graph from database...")
         G = nx.Graph()
 
         async with await AsyncConnection.connect(self.db_conn_str) as conn:
             async with conn.cursor() as cur:
-                # Load Nodes
-                await cur.execute("SELECT id FROM nodes")
-                async for row in cur:
-                    G.add_node(str(row[0]))
+                # Load Nodes in pages
+                offset = 0
+                total_nodes = 0
+                while True:
+                    await cur.execute(
+                        "SELECT id FROM nodes ORDER BY id LIMIT %s OFFSET %s",
+                        (self.page_size, offset),
+                    )
+                    rows = await cur.fetchall()
+                    if not rows:
+                        break
+                    for row in rows:
+                        G.add_node(str(row[0]))
+                        total_nodes += 1
+                    offset += self.page_size
+                    logger.debug(f"Loaded {total_nodes} nodes so far...")
 
-                # Load Edges (weighted)
-                await cur.execute("SELECT source_id, target_id, weight FROM edges")
-                async for row in cur:
-                    G.add_edge(str(row[0]), str(row[1]), weight=float(row[2]))
+                # Load Edges in pages
+                offset = 0
+                total_edges = 0
+                while True:
+                    await cur.execute(
+                        "SELECT source_id, target_id, weight FROM edges ORDER BY source_id LIMIT %s OFFSET %s",
+                        (self.page_size, offset),
+                    )
+                    rows = await cur.fetchall()
+                    if not rows:
+                        break
+                    for row in rows:
+                        G.add_edge(str(row[0]), str(row[1]), weight=float(row[2]))
+                        total_edges += 1
+                    offset += self.page_size
+                    logger.debug(f"Loaded {total_edges} edges so far...")
 
         logger.info(
             f"Graph loaded: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges."
         )
         return G
 
-    def detect_communities(self, G: nx.Graph) -> list[dict]:
+    def detect_communities(self, G: nx.Graph) -> list[dict[str, Any]]:
         """Run Hierarchical Leiden algorithm and extract node-to-community mappings."""
         if G.number_of_nodes() == 0:
             logger.warning("Graph is empty. No communities to detect.")
@@ -83,11 +111,13 @@ class CommunityDetector:
             return results
 
         except Exception as e:
-            logger.error(f"Failed to run hierarchical clustering: {e}")
-            logger.info("Falling back to simple clustering...")
-            return self._fallback_clustering(G)
+            raise CommunityDetectionError(
+                f"Failed to detect communities: {str(e)}",
+                graph_size=G.number_of_nodes(),
+                details={"max_cluster_size": max_cluster_size, "error": str(e)},
+            ) from e
 
-    def _fallback_clustering(self, G: nx.Graph) -> list[dict]:
+    def _fallback_clustering(self, G: nx.Graph) -> list[dict[str, Any]]:
         """Fallback clustering when hierarchical fails."""
         results = []
         # Level 0: each node in its own cluster
@@ -101,7 +131,7 @@ class CommunityDetector:
 
         return results
 
-    async def save_communities(self, memberships: list[dict]):
+    async def save_communities(self, memberships: list[dict[str, Any]]) -> None:
         """
         Persist the community structure and hierarchy to Postgres.
         """
@@ -122,7 +152,9 @@ class CommunityDetector:
                 # membership records: {"node_id": uuid, "level": 0, "cluster_id": "0-5"}
                 # We need to find for each cluster_id, who is its parent at level + 1
                 unique_comms = {}  # cluster_id -> level
-                node_paths = {}  # node_id -> {level: cluster_id}
+                node_paths: dict[
+                    str, dict[int, str]
+                ] = {}  # node_id -> {level: cluster_id}
 
                 for m in memberships:
                     unique_comms[m["cluster_id"]] = m["level"]
@@ -182,7 +214,7 @@ class CommunityDetector:
 # --- CLI Test ---
 if __name__ == "__main__":
 
-    async def main():
+    async def main() -> None:
         import os
 
         conn_str = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"

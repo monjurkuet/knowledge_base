@@ -3,10 +3,11 @@ Shared HTTP client for OpenAI-compatible API calls
 """
 
 import asyncio
-import logging
-import httpx
 import json
-from typing import Optional, Any, Dict, List
+import logging
+from typing import Any, cast
+
+import httpx
 
 from knowledge_base.config import get_config
 
@@ -19,18 +20,18 @@ class ChatMessage:
     def __init__(
         self,
         role: str,
-        content: Optional[str] = None,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        tool_call_id: Optional[str] = None,
+        content: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        tool_call_id: str | None = None,
     ):
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization"""
-        result: Dict[str, Any] = {"role": self.role}
+        result: dict[str, Any] = {"role": self.role}
         if self.content is not None:
             result["content"] = self.content
         if self.tool_calls is not None:
@@ -46,9 +47,9 @@ class ChatCompletionRequest:
     def __init__(
         self,
         model: str,
-        messages: list,
-        tools: Optional[list] = None,
-        tool_choice: Optional[Any] = "auto",
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = "auto",
         temperature: float = 0.7,
         max_tokens: int = 2000,
         stream: bool = False,
@@ -61,7 +62,7 @@ class ChatCompletionRequest:
         self.max_tokens = max_tokens
         self.stream = stream
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization"""
         result = {
             "model": self.model,
@@ -87,7 +88,7 @@ class HTTPClient:
     RETRY_DELAY = 3.0
     TIMEOUT_SECONDS = 30
 
-    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(self, base_url: str | None = None, api_key: str | None = None):
         config = get_config()
         self.api_url = (base_url or config.llm.openai_api_base).rstrip("/")
         self.api_key = api_key or config.llm.api_key
@@ -95,7 +96,7 @@ class HTTPClient:
 
     async def chat_completion(
         self, request: ChatCompletionRequest, stream: bool = False
-    ) -> Optional[dict]:
+    ) -> dict[str, Any] | None:
         """
         Send chat completion request to API
 
@@ -123,7 +124,8 @@ class HTTPClient:
                             json=request.to_dict(),
                         )
                         response.raise_for_status()
-                        return response.json()
+                        result = response.json()
+                        return cast(dict[str, Any], result)
             except httpx.TimeoutException:
                 logger.warning(f"Timeout attempt {attempt + 1}/{self.MAX_RETRIES}")
                 if attempt < self.MAX_RETRIES - 1:
@@ -146,9 +148,9 @@ class HTTPClient:
         self,
         client: httpx.AsyncClient,
         url: str,
-        headers: dict,
+        headers: dict[str, str],
         request: ChatCompletionRequest,
-    ) -> Optional[dict]:
+    ) -> dict[str, Any] | None:
         """Handle streaming response"""
         async with client.stream(
             "POST", url, headers=headers, json=request.to_dict()
